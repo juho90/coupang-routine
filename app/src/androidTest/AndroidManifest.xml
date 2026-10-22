@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <!-- Test APK only. Exposes fixed, generated fixtures; never reads user files or URI input. -->
+        <provider
+            android:name="dev.local.rebuy.importproduct.ProductImageFixtureProvider"
+            android:authorities="dev.local.rebuy.test.product-image-fixture"
+            android:exported="true"
+            android:grantUriPermissions="false" />
+    </application>
+</manifest>

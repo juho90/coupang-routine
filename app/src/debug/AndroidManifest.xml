@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Visibility for the fixed image provider in the separate instrumentation APK only. -->
+    <queries>
+        <provider android:authorities="dev.local.rebuy.test.product-image-fixture" />
+    </queries>
+</manifest>
