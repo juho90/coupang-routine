@@ -14,19 +14,35 @@
 
 0.7.7의 **마지막 실행 진단 보기**에서는 실행 단계, 상품명·옵션·담기 버튼 확인 여부, 화면 구조별 확인 결과와 읽은 노드 수를 확인합니다. 제한 시간 초과 전의 마지막 단계와 접근성 서비스 중단·연결 해제·사용자 중지를 구분하며, 클릭 요청 선점과 Android의 클릭 수락도 구분합니다. 마지막 진단은 앱을 다시 열어도 남습니다. **진단 내용 복사**를 누르면 그 진단만 복사합니다. 화면 원문·상품명·URL·계정 정보는 진단에 저장하지 않으며, 진단 조회만으로 담기가 시작되지는 않습니다.
 
-## PC 캡처를 블루스택으로 보내기 (0.7.0-preview)
+## PC 캡처를 블루스택으로 보내기
 
-1. 블루스택을 실행하고 최신 다시담기 APK를 설치합니다. 이 PC에는 업데이트 설치되어 있습니다.
-2. 제공된 `pc-clipboard-1.0.1/RebuyClipboard.exe`를 실행합니다.
-3. Windows에서 `Win+Shift+S`로 상품명·옵션·가격이 보이게 캡처합니다.
-4. PC 전송기 창에서 **클립보드 이미지 보내기**를 누르거나, 전송기 창에 포커스가 있을 때 `Ctrl+V`를 누릅니다.
-5. 블루스택의 다시담기에 인식 결과 검토 화면이 열립니다. 후보를 확인하고 **입력란에 적용**을 누릅니다. 상품명·옵션·금액 한도와 공유 URL을 확인한 뒤 **저장**합니다.
+PC 도구 소스는 `tools`에 있습니다. GUI 전송기를 콘솔 CLI 1.1.0으로 바꿨습니다. 저장소 루트에서 게시 프로필로 EXE를 만든 뒤 실행합니다.
 
-기존 상품 등록·수정 창이 열려 있으면 작성하던 입력을 유지합니다. 닫혀 있으면 새 등록 창을 엽니다. 가격은 자동 선택하지 않고, 이미지에 없는 URL·구매 수량·주기·날짜를 추측하지 않습니다. 전송만으로 상품 저장·장바구니·주문이 실행되지 않습니다.
+```powershell
+dotnet publish .\tools
+.\tools\dist\RebuyClipboard.exe --help
+.\tools\dist\RebuyClipboard.exe devices
 
-전송기는 사용자가 버튼이나 `Ctrl+V`를 누를 때만 Windows 클립보드의 이미지를 읽습니다. 자동 감시·클립보드 변경·화면 자동 캡처는 없습니다. PNG를 로컬 ADB 연결로 전달하며 자체 서버를 사용하지 않습니다. 기본 기기는 `127.0.0.1:5555`, ADB는 `C:\platform-tools\adb.exe` 등을 자동 탐색합니다. 연결되지 않으면 전송기에서 표시한 경로·기기 주소를 확인하고 블루스택의 Android 디버깅 연결을 사용자가 설정해야 합니다. 자세한 빌드·전송 진단 방법은 [desktop/README.md](desktop/README.md)에 있습니다.
+# Win+Shift+S로 상품을 캡처한 뒤 실행
+.\tools\dist\RebuyClipboard.exe send --clipboard
+
+# 저장된 이미지를 확인하거나 보내기
+.\tools\dist\RebuyClipboard.exe check --image 'C:\captures\product.png'
+.\tools\dist\RebuyClipboard.exe send --image 'C:\captures\product.png'
+```
+
+블루스택을 실행하고 최신 다시담기 APK를 설치해야 합니다. 기본 배포는 EXE 하나이며 .NET Windows Desktop Runtime 10과 별도의 ADB가 필요합니다. 기본 기기는 `127.0.0.1:5555`, ADB는 `C:\platform-tools\adb.exe` 등을 자동 탐색합니다. `--adb`와 `--device`로 바꿀 수 있습니다. 인자 없이 실행하면 도움말을 표시합니다.
+
+전송 후 Android 앱에서 인식 결과를 검토하고 **입력란에 적용**을 누릅니다. 기존 상품 등록·수정 창이 열려 있으면 작성하던 입력을 유지합니다. 가격은 자동 선택하지 않고 이미지에 없는 URL·구매 수량·주기·날짜를 추측하지 않습니다. 전송만으로 상품 저장·장바구니·주문이 실행되지 않습니다.
+
+`send --clipboard`를 실행할 때만 Windows 클립보드의 이미지를 읽습니다. 자동 감시·클립보드 변경·화면 자동 캡처는 없습니다. PNG를 로컬 ADB로 전달하며 자체 서버를 사용하지 않습니다. 종료 코드는 `$LASTEXITCODE`로 확인합니다. 자세한 명령·빌드 방법은 [tools/README.md](tools/README.md)에 있습니다.
 
 전송본은 Android 앱 전용 캐시에만 잠시 보관하고 **적용·취소·읽기 중단** 때 삭제합니다. 검토를 끝내지 않고 앱을 닫으면 다음 이미지 처리 때 10분이 지난 임시 파일을 정리합니다. 일반 Android 앱은 전송함에 접근할 수 없으며 ADB shell과 다시담기 자신의 UID만 사용합니다. 입력은 PNG 24MB 이하로 제한합니다.
+
+
+## 공통 기능 확인 샘플
+
+실제 쿠팡 연동 확인용 URL은 [testdata/coupang-product.json](testdata/coupang-product.json)에서 관리합니다. CLI의 sample show와 sample open, mock 연동 검사가 같은 데이터를 사용합니다. 상품명·옵션은 확인 전까지 비워 두며 URL 열기만으로 담기나 구매를 시작하지 않습니다. 사용 방법은 [testdata/README.md](testdata/README.md)에 있습니다.
 
 ## 클립보드 이미지 붙여넣기 (0.6.0-preview)
 

@@ -86,13 +86,33 @@ PC 인입 기기 검사 3개는 앱 전용 수신함에 합성 PNG를 쓰고 REA
 
 0.7.2-preview에서는 장바구니 시작 전의 HTTP 공유 링크 해석을 제거했습니다. 쿠팡 열기와 같은 ProductLauncher를 호출하므로 공유 URL을 그대로 Android에 전달하며, 정확한 전체 상품 주소는 기존 native 실행을 먼저 시도합니다. 네트워크 접속 없이 캡처한 Intent를 검사하는 단위 테스트에서 공유 URL 전달과 fallback을 검증했습니다. 시작 실패 사유를 표시하고 다른 도우미 실행 중에는 기존 세션을 덮어쓰지 않습니다. 옵션의 `285g x 1세트`와 `285g × 1세트`는 동일하게 비교하지만 제목 일치·수량·단위·소수점·모델명 차이와 상세 화면 구조 검사는 유지합니다. 이번 변경으로 실제 쿠팡 담기나 결제를 실행하지 않았으며, 장바구니 추가 완료까지의 성공을 검증한 것은 아닙니다.
 
-## Windows 전송기 검증
+## 공통 샘플 데이터와 CLI 1.2.0 검증 (2026-10-26)
+
+사용자가 지정한 샘플 URL을 testdata/coupang-product.json 한 곳에 저장했습니다. CLI는 게시 때 해당 JSON을 EXE에 포함하고, mock 검사도 원본 JSON을 읽습니다. sample show는 JSON을 표시하고 sample open은 같은 URL의 쿠팡 앱 열기 요청만 수행합니다. 상품명·옵션은 미확인 상태이므로 null로 두었습니다.
+
+dotnet publish tools로 게시한 실제 EXE와 mock ADB로 11개 검사가 통과했습니다. 원본 JSON과 EXE 데이터 일치, 같은 URL의 shell 인용·앱 지정·연결 확인을 검사했습니다. 기존 PNG 전송 검사도 통과했으며 mock 호출은 11회였습니다. 이 검증에서는 실제 쿠팡 앱 열기·담기·결제를 실행하지 않았습니다. 게시 중 NuGet 취약성 데이터 서버 접근 실패 경고 NU1900이 있었으나 필요한 패키지는 로컬에 있어 빌드·게시가 성공했습니다.
+
+앞서 CLI 1.1.0의 실제 BlueStacks 전송에서는 합성 이미지의 상품명 다시담기 전송 확인용 두유와 옵션 600ml x 2개가 앱의 OCR 검토 화면에 표시되는 것을 확인했습니다. 이는 이번 샘플 URL의 실제 상품 정보 검증과 별개입니다.
+
+## Windows CLI 1.1.0 검증 (2026-10-26)
+
+desktop 소스를 tools로 옮기고 GUI 대신 콘솔 EXE로 전환했습니다. .NET SDK 10.0.403으로 Windows x64 단일 파일 배포를 빌드했습니다. 기본 배포는 런타임 의존형이며 .NET Windows Desktop Runtime 10이 필요합니다. 배포 폴더에는 RebuyClipboard.exe와 README.md만 있습니다.
+
+실제 배포 EXE로 인자 없음·도움말·버전·알 수 없는 명령·누락된 이미지 값·정상 이미지 확인·불량 이미지 거부·mock ADB 이미지 전송·mock 장치 조회 9개가 통과했습니다. 공백이 있는 입력 경로, base64를 푼 PNG의 크기와 픽셀, 전송 GUID 재사용, READY 응답 후 검토 화면 실행 명령을 확인했습니다. mock ADB 호출은 총 7회였습니다. 실제 Android 연결·클립보드 읽기·상품 저장·장바구니·결제는 이 검증에서 실행하지 않았습니다.
+
+2026-10-26 게시 설정을 Properties/PublishProfiles/WindowsX64.pubxml로 옮기고 tools/build.ps1을 제거했습니다. dotnet publish tools/RebuyClipboard.csproj -c Release -p:PublishProfile=WindowsX64 명령의 복원·빌드·게시와 게시 EXE의 --version 실행이 성공했습니다. README 자동 복사도 SHA-256 대조로 확인했습니다. 이번 게시 설정 변경에서는 기존 CLI 9개 검사를 다시 실행하지 않았습니다.
+
+2026-10-26 게시 명령을 dotnet publish .\tools로 줄였습니다. 게시 시에만 기본 프로필을 선택하도록 설정했고 추가 옵션 없는 게시와 EXE 버전 실행을 확인했습니다. 일반 MSBuild 평가에서는 Configuration=Debug, PublishProfile 빈 값으로 조회돼 게시 프로필이 적용되지 않음을 확인했습니다.
+
+재검증 명령과 mock 소스는 tools/tests에 있습니다. 기존 1.0.1 GUI 검증은 아래에 과거 기록으로 유지합니다.
+
+## Windows 전송기 1.0.1 검증 (과거 GUI 버전)
 
 설치된 .NET SDK 10과 Windows Desktop Runtime 10으로 1.0.1을 빌드했습니다. exe·dll·deps.json·runtimeconfig.json·README의 5개 파일을 함께 제공합니다. 합성 이미지 인코딩·잘못된 파일 거부·도움말 및 mock ADB의 전송 바이트를 점검했습니다. 실제 PC 전송기의 CLI를 실행해 BlueStacks 수신 상태 READY와 MainActivity 열기 성공(종료 코드 0)을 확인했고, Android 스크린샷에서 한국어 상품명·`600ml, 2개` 옵션·가격 미선택 상태의 검토 화면을 확인했습니다. 검증용 검토 화면과 새 등록 창은 취소하여 기존 상품을 보존했습니다.
 
 Windows ADB의 `exec-in` 전송은 원격 기록 완료 전에 데이터 끝부분이 누락됐고, `shell -T`에 PNG를 직접 입력하면 CR/LF·Ctrl-Z 텍스트 처리가 발생했습니다. 1.0.1은 메모리에서 base64로 변환한 ASCII를 `shell -T -e none` 파이프로 보내고 Android에서 디코딩해 같은 보호된 수신함에 씁니다. 원격 명령 종료와 READY를 확인한 뒤에만 검토 화면을 엽니다. 추가 PC 이미지 파일이나 공유 저장소 이미지를 만들지 않습니다.
 
-사용자 Windows·Android 클립보드는 자동 검사에서 읽거나 덮어쓰지 않았습니다. Windows 버튼 입력은 명시적 사용자 동작에서만 Clipboard.GetImage를 호출하도록 구현했으며, 자동 전송 검증은 합성 파일 CLI와 Android 테스트용 URI를 사용했습니다. 소스의 상세 실행·빌드 방법은 `desktop/README.md`에 있습니다.
+사용자 Windows·Android 클립보드는 자동 검사에서 읽거나 덮어쓰지 않았습니다. Windows 버튼 입력은 명시적 사용자 동작에서만 Clipboard.GetImage를 호출하도록 구현했으며, 자동 전송 검증은 합성 파일 CLI와 Android 테스트용 URI를 사용했습니다. 소스의 상세 실행·빌드 방법은 `tools/README.md`에 있습니다.
 
 ## 쿠팡 연동 검증 범위
 

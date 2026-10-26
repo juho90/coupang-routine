@@ -1,173 +1,10 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Drawing.Imaging;
-using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
 
 namespace RebuyClipboard;
-
-internal static class Program
-{
-    [STAThread]
-    private static int Main(string[] args)
-    {
-        if (args.Length > 0)
-        {
-            try { return RunCliAsync(Options.Parse(args)).GetAwaiter().GetResult(); }
-            catch (UserMessageException failure) { Console.Error.WriteLine(failure.Message); return 2; }
-            catch (OperationCanceledException) { Console.Error.WriteLine("작업이 중단되었거나 제한 시간을 넘었습니다."); return 3; }
-            catch { Console.Error.WriteLine("이미지를 처리하지 못했습니다. 입력 이미지와 BlueStacks 실행 상태를 확인해 주세요."); return 4; }
-        }
-        ApplicationConfiguration.Initialize();
-        Application.Run(new SendImageForm());
-        return 0;
-    }
-
-    private static async Task<int> RunCliAsync(Options options)
-    {
-        if (options.Help)
-        {
-            Console.WriteLine("RebuyClipboard.exe --image <image-file> [--send] [--adb <adb.exe>] [--device 127.0.0.1:5555]");
-            Console.WriteLine("--image 모드는 클립보드를 읽지 않습니다. --send가 있어야 Android 앱으로 전송합니다.");
-            return 0;
-        }
-        if (options.ImageFile is null) throw new UserMessageException("CLI 시험에는 --image로 이미지 파일을 지정해 주세요.");
-        var png = await Task.Run(() => ImagePayload.FromFile(options.ImageFile));
-        if (!options.Send)
-        {
-            Console.WriteLine("이미지 확인 완료. 전송하지 않았습니다.");
-            return 0;
-        }
-        using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(45));
-        await AndroidTransfer.SendAsync(png, options.Adb ?? AdbDiscovery.Find(), options.Device, null, limit.Token);
-        Console.WriteLine("전송 완료. 다시담기 앱에서 읽은 내용을 검토한 뒤 적용해 주세요.");
-        return 0;
-    }
-}
-
-internal sealed record Options(string? ImageFile, bool Send, string? Adb, string Device, bool Help)
-{
-    public static Options Parse(string[] args)
-    {
-        string? image = null, adb = null;
-        var device = "127.0.0.1:5555";
-        bool send = false, help = false;
-        for (var index = 0; index < args.Length; index++)
-        {
-            string Value()
-            {
-                if (++index >= args.Length) throw new UserMessageException("옵션 뒤에 필요한 값을 지정해 주세요.");
-                return args[index];
-            }
-            switch (args[index])
-            {
-                case "--image": image = Value(); break;
-                case "--adb": adb = Value(); break;
-                case "--device": device = Value(); break;
-                case "--send": send = true; break;
-                case "--help": case "-h": help = true; break;
-                default: throw new UserMessageException("지원하지 않는 실행 옵션입니다. --help로 사용법을 확인해 주세요.");
-            }
-        }
-        return new Options(image, send, adb, device, help);
-    }
-}
-
-internal sealed class SendImageForm : Form
-{
-    private readonly Button send = new() { Text = "클립보드 이미지 보내기", AutoSize = true, MinimumSize = new Size(300, 46) };
-    private readonly Button chooseAdb = new() { Text = "ADB 선택", AutoSize = true };
-    private readonly Button cancel = new() { Text = "전송 중단", AutoSize = true, Enabled = false };
-    private readonly TextBox adbPath = new() { ReadOnly = true, Dock = DockStyle.Fill, AccessibleName = "ADB 실행 파일" };
-    private readonly TextBox device = new() { Text = "127.0.0.1:5555", Dock = DockStyle.Fill, AccessibleName = "BlueStacks 연결 주소" };
-    private readonly Label status = new() { Text = "캡처한 뒤 보내기 버튼이나 이 창에서 Ctrl+V를 눌러 주세요.", AutoSize = true, MaximumSize = new Size(500, 0) };
-    private readonly ProgressBar progress = new() { Style = ProgressBarStyle.Marquee, Dock = DockStyle.Fill, Visible = false };
-    private CancellationTokenSource? operation;
-    private bool busy;
-
-    public SendImageForm()
-    {
-        Text = "다시담기 PC 이미지 보내기";
-        Font = new Font("맑은 고딕", 10F);
-        AutoScaleMode = AutoScaleMode.Dpi;
-        StartPosition = FormStartPosition.CenterScreen;
-        MinimumSize = new Size(570, 470);
-        ClientSize = new Size(620, 520);
-        MaximizeBox = false;
-        adbPath.Text = AdbDiscovery.Find() ?? "";
-        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, AutoScroll = true, Padding = new Padding(22), ColumnCount = 2, RowCount = 9 };
-        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        layout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        for (var row = 0; row < 9; row++) layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        var heading = new Label { Text = "PC에서 캡처한 상품 이미지를 BlueStacks로", Font = new Font(Font, FontStyle.Bold), AutoSize = true, Margin = new Padding(0, 0, 0, 12) };
-        layout.Controls.Add(heading, 0, 0); layout.SetColumnSpan(heading, 2);
-        var guide = new Label { Text = "1. BlueStacks에서 다시담기 앱을 설치하고 실행하세요.\n2. Windows에서 Win+Shift+S로 상품을 캡처하세요.\n3. 이 창에서 보내기 또는 Ctrl+V를 누른 뒤 앱에서 검토하세요.", AutoSize = true, Margin = new Padding(0, 0, 0, 14) };
-        layout.Controls.Add(guide, 0, 1); layout.SetColumnSpan(guide, 2);
-        layout.Controls.Add(new Label { Text = "ADB", AutoSize = true }, 0, 2);
-        layout.Controls.Add(adbPath, 0, 3); layout.Controls.Add(chooseAdb, 1, 3);
-        layout.Controls.Add(new Label { Text = "BlueStacks 연결 주소", AutoSize = true, Margin = new Padding(0, 8, 0, 0) }, 0, 4);
-        layout.Controls.Add(device, 0, 5); layout.SetColumnSpan(device, 2);
-        var actions = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill, Margin = new Padding(0, 16, 0, 10) };
-        actions.Controls.Add(send); actions.Controls.Add(cancel);
-        layout.Controls.Add(actions, 0, 6); layout.SetColumnSpan(actions, 2);
-        layout.Controls.Add(progress, 0, 7); layout.SetColumnSpan(progress, 2);
-        layout.Controls.Add(status, 0, 8); layout.SetColumnSpan(status, 2);
-        Controls.Add(layout);
-        send.Click += async (_, _) => await SendClipboardAsync();
-        cancel.Click += (_, _) => operation?.Cancel();
-        chooseAdb.Click += (_, _) => ChooseAdb();
-        FormClosing += (_, _) => operation?.Cancel();
-        AcceptButton = send;
-    }
-
-    protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
-    {
-        if (keyData == (Keys.Control | Keys.V))
-        {
-            if (!busy) _ = SendClipboardAsync();
-            return true;
-        }
-        return base.ProcessCmdKey(ref msg, keyData);
-    }
-
-    private void ChooseAdb()
-    {
-        using var picker = new OpenFileDialog { Title = "adb.exe 선택", Filter = "Android Debug Bridge (adb.exe)|adb.exe", CheckFileExists = true, Multiselect = false };
-        if (picker.ShowDialog(this) == DialogResult.OK) adbPath.Text = picker.FileName;
-    }
-
-    private async Task SendClipboardAsync()
-    {
-        if (busy) return;
-        busy = true;
-        send.Enabled = chooseAdb.Enabled = device.Enabled = false;
-        cancel.Enabled = progress.Visible = true;
-        operation = new CancellationTokenSource(TimeSpan.FromSeconds(45));
-        try
-        {
-            status.Text = "클립보드 이미지를 확인하고 있습니다.";
-            // This is the only clipboard read in the program, reached only by a local user action.
-            using var image = Clipboard.GetImage();
-            if (image is null) throw new UserMessageException("Windows 클립보드에 이미지가 없습니다. Win+Shift+S로 캡처한 뒤 다시 눌러 주세요.");
-            var png = await Task.Run(() => ImagePayload.FromImage(image), operation.Token);
-            var updates = new Progress<string>(message => { if (!IsDisposed) status.Text = message; });
-            await AndroidTransfer.SendAsync(png, adbPath.Text, device.Text, updates, operation.Token);
-            if (!IsDisposed) status.Text = "전송했습니다. 다시담기 앱에서 내용을 검토한 뒤 입력란에 적용해 주세요.";
-        }
-        catch (UserMessageException failure) { if (!IsDisposed) status.Text = failure.Message; }
-        catch (OperationCanceledException) { if (!IsDisposed) status.Text = "전송이 중단되었거나 제한 시간을 넘었습니다. 이미 전달됐다면 다시담기 화면을 확인해 주세요."; }
-        catch (ExternalException) { if (!IsDisposed) status.Text = "클립보드 이미지를 열 수 없습니다. 이미지를 다시 복사한 뒤 보내 주세요."; }
-        catch (OutOfMemoryException) { if (!IsDisposed) status.Text = "이미지가 너무 커서 처리하지 못했습니다. 캡처 범위를 줄여 주세요."; }
-        catch { if (!IsDisposed) status.Text = "전송하지 못했습니다. 이미지와 BlueStacks 실행 상태를 확인해 주세요."; }
-        finally
-        {
-            operation.Dispose(); operation = null;
-            busy = false;
-            if (!IsDisposed) { send.Enabled = chooseAdb.Enabled = device.Enabled = true; cancel.Enabled = progress.Visible = false; }
-        }
-    }
-}
 
 internal static class ImagePayload
 {
@@ -244,6 +81,13 @@ internal static class ImagePayload
 
 internal static class AdbDiscovery
 {
+    public static string Resolve(string? configured)
+    {
+        var path = configured ?? Find();
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path) || !string.Equals(Path.GetFileName(path), "adb.exe", StringComparison.OrdinalIgnoreCase))
+            throw new UserMessageException("ADB를 찾지 못했습니다. --adb 옵션으로 adb.exe를 지정해 주세요.");
+        return path;
+    }
     public static string? Find()
     {
         var candidates = new List<string> { Path.Combine(AppContext.BaseDirectory, "adb.exe") };
@@ -258,6 +102,27 @@ internal static class AdbDiscovery
     }
 }
 
+internal static class AndroidConnection
+{
+    public static async Task ConnectAsync(string adb, string serial, CancellationToken cancellation)
+    {
+        var localConnection = Regex.Match(serial, @"^(?:127\.0\.0\.1|localhost):([0-9]{1,5})$");
+        if (localConnection.Success && !(int.TryParse(localConnection.Groups[1].Value, out var port) && port is > 0 and <= 65535))
+            throw new UserMessageException("올바른 연결 포트를 입력해 주세요. 기본값은 127.0.0.1:5555입니다.");
+        if (!Regex.IsMatch(serial, @"^[a-zA-Z0-9._:-]{1,128}$"))
+            throw new UserMessageException("올바른 BlueStacks 연결 주소 또는 연결된 Android 장치 번호를 입력해 주세요.");
+        if (localConnection.Success)
+        {
+            var connect = await AdbProcess.RunAsync(adb, ["connect", serial], null, cancellation, TimeSpan.FromSeconds(8));
+            if (connect.ExitCode != 0) throw new UserMessageException("BlueStacks에 연결하지 못했습니다. 실행 상태와 ADB 연결 주소를 확인해 주세요.");
+        }
+        var state = await AdbProcess.RunAsync(adb, ["-s", serial, "get-state"], null, cancellation, TimeSpan.FromSeconds(8));
+        if (state.ExitCode != 0 || state.Output.Trim() != "device")
+            throw new UserMessageException("Android 에뮬레이터를 찾지 못했습니다. BlueStacks를 실행하고 ADB 연결 주소를 확인해 주세요.");
+    }
+}
+
+
 internal static class AndroidTransfer
 {
     private const string Provider = "content://dev.local.rebuy.pc-images";
@@ -265,20 +130,9 @@ internal static class AndroidTransfer
     public static async Task SendAsync(byte[] png, string? adb, string serial, IProgress<string>? progress, CancellationToken cancellation)
     {
         if (string.IsNullOrWhiteSpace(adb) || !File.Exists(adb) || !string.Equals(Path.GetFileName(adb), "adb.exe", StringComparison.OrdinalIgnoreCase))
-            throw new UserMessageException("ADB를 찾지 못했습니다. ADB 선택에서 adb.exe를 지정해 주세요.");
-        var localConnection = Regex.Match(serial, @"^(?:127\.0\.0\.1|localhost):([0-9]{1,5})$");
-        if (localConnection.Success && !(int.TryParse(localConnection.Groups[1].Value, out var port) && port is > 0 and <= 65535))
-            throw new UserMessageException("올바른 연결 포트를 입력해 주세요. 기본값은 127.0.0.1:5555입니다.");
-        if (!Regex.IsMatch(serial, @"^[a-zA-Z0-9._:-]{1,128}$"))
-            throw new UserMessageException("올바른 BlueStacks 연결 주소 또는 연결된 Android 장치 번호를 입력해 주세요.");
+            throw new UserMessageException("ADB를 찾지 못했습니다. --adb 옵션으로 adb.exe를 지정해 주세요.");
         progress?.Report("BlueStacks 연결과 다시담기 앱 설치를 확인하고 있습니다.");
-        if (localConnection.Success)
-        {
-            var connect = await AdbProcess.RunAsync(adb, ["connect", serial], null, cancellation, TimeSpan.FromSeconds(8));
-            if (connect.ExitCode != 0) throw new UserMessageException("BlueStacks에 연결하지 못했습니다. 실행 상태와 ADB 연결 주소를 확인해 주세요.");
-        }
-        var state = await AdbProcess.RunAsync(adb, ["-s", serial, "get-state"], null, cancellation, TimeSpan.FromSeconds(8));
-        if (state.ExitCode != 0 || state.Output.Trim() != "device") throw new UserMessageException("Android 에뮬레이터를 찾지 못했습니다. BlueStacks를 실행하고 ADB 연결 주소를 확인해 주세요.");
+        await AndroidConnection.ConnectAsync(adb, serial, cancellation);
         // BlueStacks can report a phone hardware name (for example qcom), so verify the
         // chosen connected device and our own installed package instead of guessing by model.
         var installed = await AdbProcess.RunAsync(adb, ["-s", serial, "shell", "pm", "path", "dev.local.rebuy"], null, cancellation, TimeSpan.FromSeconds(5));

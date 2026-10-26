@@ -10,3 +10,5 @@ local.properties
 .kotlin/
 **/bin/
 **/obj/
+/tools/dist/
+*.pubxml.user

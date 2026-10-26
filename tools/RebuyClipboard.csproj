@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <DisableWinExeOutputInference>true</DisableWinExeOutputInference>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>RebuyClipboard</AssemblyName>
+    <Product>다시담기 이미지 전송 CLI</Product>
+    <Version>1.2.0</Version>
+    <PublishProfile Condition="'$(PublishProfile)' == '' and '$(_IsPublishing)' == 'true'">WindowsX64</PublishProfile>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <RestoreConfigFile>$(MSBuildProjectDirectory)/NuGet.Config</RestoreConfigFile>
+    <DefaultItemExcludes>$(DefaultItemExcludes);dist/**</DefaultItemExcludes>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Remove="tests/**/*.cs" />
+    <EmbeddedResource Include="../testdata/coupang-product.json" LogicalName="RebuyClipboard.TestData.CoupangProduct.json" />
+    <None Update="README.md" CopyToPublishDirectory="Always" ExcludeFromSingleFile="true" />
+  </ItemGroup>
+</Project>
