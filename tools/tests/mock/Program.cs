@@ -27,7 +27,7 @@ if (Equal("-s", serial, "shell", "pm", "path", "dev.local.rebuy"))
 if (Equal("-s", serial, "shell", "pm", "path", "com.coupang.mobile"))
 { Console.WriteLine("package:/synthetic/coupang.apk"); return 0; }
 if (productUrl is not null && Equal("-s", serial, "shell", "am", "start", "-W", "-a", "android.intent.action.VIEW",
-    "-d", "'" + productUrl + "'", "-p", "com.coupang.mobile"))
+    "-c", "android.intent.category.BROWSABLE", "-d", "'" + productUrl + "'"))
 { Console.WriteLine("Status: ok"); return 0; }
 if (args.Length == 7 && args.Take(6).SequenceEqual(new[] { "-s", serial, "shell", "-T", "-e", "none" }))
 {

@@ -45,9 +45,9 @@ internal static class SampleProductTransfer
         // adb shell joins argv for the remote shell; quote the complete URL for that boundary.
         var quotedUrl = "'" + sample.ProductUrl.Replace("'", "'\"'\"'", StringComparison.Ordinal) + "'";
         var start = await AdbProcess.RunAsync(adb,
-            ["-s", serial, "shell", "am", "start", "-W", "-a", "android.intent.action.VIEW", "-d", quotedUrl, "-p", "com.coupang.mobile"],
+            ["-s", serial, "shell", "am", "start", "-W", "-a", "android.intent.action.VIEW", "-c", "android.intent.category.BROWSABLE", "-d", quotedUrl],
             null, cancellation, TimeSpan.FromSeconds(10));
         if (start.ExitCode != 0 || !Regex.IsMatch(start.Output, @"(?m)^\s*Status:\s*ok\s*$"))
-            throw new UserMessageException("쿠팡 앱에서 샘플 URL을 열지 못했습니다. 연결 상태와 공유 링크를 확인해 주세요.");
+            throw new UserMessageException("Android에서 샘플 URL 열기 요청을 처리하지 못했습니다. 연결 상태와 공유 링크를 확인해 주세요.");
     }
 }

@@ -35,7 +35,7 @@ internal static class Program
             else
             {
                 await SampleProductTransfer.OpenAsync(sample, AdbDiscovery.Resolve(options.Adb), options.Device, new ConsoleProgress(), cancellation);
-                Console.WriteLine("샘플 URL 열기 요청을 쿠팡 앱이 수락했습니다. 실제 상품 화면은 기기에서 확인해 주세요. 담기·구매는 실행하지 않았습니다.");
+                Console.WriteLine("샘플 URL 열기 요청이 Android에 전달됐습니다. 브라우저를 거쳐 쿠팡 앱으로 연결될 수 있으므로 실제 상품 화면을 확인해 주세요. 담기·구매는 실행하지 않았습니다.");
             }
             return 0;
         }

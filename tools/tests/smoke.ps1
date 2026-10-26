@@ -71,7 +71,7 @@ $results += Invoke-Cli 'check-valid-image' @('check','--image',$image) 0
 $results += Invoke-Cli 'check-invalid-image' @('check','--image',$invalid) 2
 $results += Invoke-Cli 'sample-show' @('sample','show') 0
 $shownFixture = $results[-1].Stdout | ConvertFrom-Json
-if($shownFixture.schemaVersion -ne $fixture.schemaVersion -or $shownFixture.id -cne $fixture.id -or $shownFixture.productUrl -cne $fixture.productUrl) { throw 'Published sample differs from the shared fixture.' }
+if(($shownFixture | ConvertTo-Json -Depth 8 -Compress) -cne ($fixture | ConvertTo-Json -Depth 8 -Compress)) { throw 'Published sample differs from the shared fixture.' }
 if(Test-Path -LiteralPath (Join-Path $state 'argv.jsonl')) { throw 'Validation unexpectedly invoked ADB.' }
 
 $results += Invoke-Cli 'send-mock-image' @('send','--image',$image,'--adb',$mock,'--device','127.0.0.1:5555') 0
