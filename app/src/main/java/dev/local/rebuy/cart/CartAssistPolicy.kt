@@ -118,14 +118,30 @@ internal object CartAssistPolicy {
             node.visible && node.ancestorIds.any { it in DETAIL_CONTENT_IDS } &&
                 node.ancestorIds.none { it.contains("recommend", ignoreCase = true) }
         }
-        val titleMatched = title.length >= 4 && content.any { normalize(it.text) == title }
-        val optionMatched = option.length >= 2 && content.any {
+        val matchedTitles = content.filter { normalize(it.text) == title }
+        val titleMatched = title.length >= 4 && matchedTitles.isNotEmpty()
+        val optionMatched = option.length >= 2 && (content.any {
             normalizeOption(it.text.trim().removePrefix("옵션")).removePrefix("옵션") == option
-        }
+        } || (titleMatched && matchedTitles.any { optionInMatchedTitle(it.text, option) }))
         val buttonIndex = if (detailScreen) strictButtonIndex(nodes, targetText) else null
         return DetailInspection(detailScreen, titleMatched, optionMatched, buttonIndex != null,
             buttonIndex?.takeIf { titleMatched && optionMatched })
     }
+
+    private val titlePackSuffix = Regex(
+        ",\\s*($NUMBER\\s*(?:밀리리터|킬로그램|밀리그램|리터|그램|kg|mg|ml|g|l)" +
+            "(?:\\s*내외)?\\s*,\\s*$NUMBER\\s*(?:개|팩|봉|병|세트|묶음))\\s*$",
+        RegexOption.IGNORE_CASE,
+    )
+
+    /** Only an explicit measured/count suffix on the same exactly matched title is evidence. */
+    private fun optionInMatchedTitle(text: String, expectedOption: String): Boolean {
+        val title = Normalizer.normalize(text, Normalizer.Form.NFKC)
+        val match = titlePackSuffix.find(title) ?: return false
+        if (normalize(title.substring(0, match.range.first)).length < 4) return false
+        return normalizeOption(match.groupValues[1]) == expectedOption
+    }
+
 
     private fun strictButtonIndex(nodes: List<Node>, targetText: String): Int? {
         val labels = nodes.withIndex().filter { (_, node) ->
@@ -146,6 +162,6 @@ internal object CartAssistPolicy {
     }
 
     fun hasConfirmedAddition(nodes: List<Node>): Boolean =
-        nodes.any { it.visible && normalize(it.text).contains("담기완료") } &&
+        nodes.any { it.visible && (normalize(it.text).contains("담기완료") || normalize(it.text) == "장바구니에상품을담았습니다") } &&
             nodes.any { it.visible && normalize(it.text) == "장바구니가기" }
 }

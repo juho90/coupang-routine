@@ -162,4 +162,44 @@ class CartAssistPolicyTest {
         assertFalse(CartAssistPolicy.requestDetailScroll(scrollableDetail(), { false }) { actions += it; true })
         assertTrue(actions.isEmpty())
     }
+    @Test fun exactTitleCanSupplyItsExplicitMeasuredPackSuffix() {
+        val title = "돌 스위티오 바나나, 1kg 내외, 1개"
+        val nodes = detail().mapIndexed { index, node -> when (index) {
+            3 -> node.copy(text = title)
+            4 -> node.copy(text = "1개")
+            else -> node
+        } }
+        assertEquals(5, CartAssistPolicy.cartTargetIndex(nodes, title, "1kg 내외, 1개"))
+        assertNull(CartAssistPolicy.cartTargetIndex(nodes, title, "1kg 내외, 2개"))
+        assertNull(CartAssistPolicy.cartTargetIndex(nodes, title, "1.2kg 내외, 1개"))
+        assertNull(CartAssistPolicy.cartTargetIndex(nodes, "돌 스위티오 바나나", "1kg 내외, 1개"))
+    }
+
+    @Test fun packSuffixNeverUsesRecommendationTextOrArbitraryTitleSubstrings() {
+        val title = "돌 스위티오 바나나, 1kg 내외, 1개"
+        fun nodes(text: String, ancestors: List<String> = content) = detail().mapIndexed { index, node -> when (index) {
+            3 -> node.copy(text = text, ancestorIds = ancestors)
+            4 -> node.copy(text = "1개")
+            else -> node
+        } }
+        assertNull(CartAssistPolicy.cartTargetIndex(nodes(title, content + "recommendation_list"), title, "1kg 내외, 1개"))
+        val withoutDelimiter = "돌 스위티오 바나나 1kg 내외, 1개"
+        assertNull(CartAssistPolicy.cartTargetIndex(nodes(withoutDelimiter), withoutDelimiter, "1kg 내외, 1개"))
+        val withExtraText = title + " 사은품"
+        assertNull(CartAssistPolicy.cartTargetIndex(nodes(withExtraText), withExtraText, "1kg 내외, 1개"))
+        assertNull(CartAssistPolicy.cartTargetIndex(nodes(title), title, "내외"))
+    }
+
+
+    @Test fun observedCartSuccessNoticeRequiresItsCartLinkAndVisibility() {
+        val notice = CartAssistPolicy.Node(text = "장바구니에 상품을 담았습니다.")
+        val link = CartAssistPolicy.Node(text = "장바구니 가기")
+        assertTrue(CartAssistPolicy.hasConfirmedAddition(listOf(notice, link)))
+        assertFalse(CartAssistPolicy.hasConfirmedAddition(listOf(notice)))
+        assertFalse(CartAssistPolicy.hasConfirmedAddition(listOf(link)))
+        assertFalse(CartAssistPolicy.hasConfirmedAddition(listOf(notice.copy(visible = false), link)))
+        assertFalse(CartAssistPolicy.hasConfirmedAddition(listOf(notice.copy(text = "장바구니에 상품을 담아 주세요"), link)))
+    }
+
+
 }

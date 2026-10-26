@@ -39,8 +39,9 @@ class CartAssistService : AccessibilityService() {
         val current = CartAssistController.currentSession() ?: return
         if (inspecting) return
         inspecting = true
+        val handles = mutableListOf<AccessibilityNodeInfo>()
         try {
-            val root = rootInActiveWindow ?: run {
+            val root = rootInActiveWindow?.also(handles::add) ?: run {
                 CartAssistController.reportStage(current, CartAssistStage.NO_ACTIVE_WINDOW)
                 return
             }
@@ -56,7 +57,7 @@ class CartAssistService : AccessibilityService() {
                 return
             }
             current.coupangSeen = true
-            val scan = scan(root)
+            val scan = scan(root, handles)
             val scanned = scan.nodes
             val nodes = scanned.map { it.second }
             CartAssistController.reportScan(current, nodes.size, nodes.count { it.resourceId.isNotEmpty() },
@@ -127,39 +128,38 @@ class CartAssistService : AccessibilityService() {
                 "쿠팡 화면을 확인하는 중 멈췄습니다. 장바구니에서 결과를 확인해 주세요."
                 else "쿠팡 화면을 읽는 중 멈췄습니다. 담기 버튼은 누르지 않았습니다.", false)
         } finally {
+            recycleNodes(handles)
             inspecting = false
         }
     }
 
     private data class ScanResult(val nodes: List<Pair<AccessibilityNodeInfo, CartAssistPolicy.Node>>, val truncated: Boolean)
 
-    private fun scan(root: AccessibilityNodeInfo): ScanResult {
-        val result = mutableListOf<Pair<AccessibilityNodeInfo, CartAssistPolicy.Node>>()
-        var truncated = false
-        fun visit(node: AccessibilityNodeInfo, parent: Int?, ancestors: List<String>, depth: Int) {
-            if (result.size >= 600 || depth > 35) {
-                truncated = true
-                return
-            }
-            if (node.packageName?.toString() != CartAssistController.COUPANG_PACKAGE) return
-            val index = result.size
-            val id = node.viewIdResourceName.orEmpty()
-            result += node to CartAssistPolicy.Node(
+    private fun scan(root: AccessibilityNodeInfo, handles: MutableList<AccessibilityNodeInfo>): ScanResult {
+        val snapshot = CartNodeTraversal.scan(
+            root = root,
+            accepts = { it.packageName?.toString() == CartAssistController.COUPANG_PACKAGE },
+            resourceId = { it.viewIdResourceName.orEmpty() },
+            childCount = { it.childCount },
+            childAt = { node, index -> node.getChild(index)?.also(handles::add) },
+        )
+        return ScanResult(snapshot.entries.map { entry ->
+            val node = entry.node
+            node to CartAssistPolicy.Node(
                 text = if (node.isPassword) "" else node.text?.toString().orEmpty(),
-                resourceId = id,
-                parentIndex = parent,
-                ancestorIds = ancestors,
+                resourceId = entry.resourceId,
+                parentIndex = entry.parentIndex,
+                ancestorIds = entry.ancestorIds,
                 visible = node.isVisibleToUser,
                 enabled = node.isEnabled,
                 clickable = node.isClickable,
-                childCount = node.childCount,
+                childCount = entry.childCount,
             )
-            for (childIndex in 0 until node.childCount) {
-                val child = node.getChild(childIndex) ?: continue
-                visit(child, index, if (id.isEmpty()) ancestors else ancestors + id, depth + 1)
-            }
-        }
-        visit(root, null, emptyList(), 0)
-        return ScanResult(result, truncated)
+        }, snapshot.truncated)
+    }
+
+    @Suppress("DEPRECATION")
+    private fun recycleNodes(handles: List<AccessibilityNodeInfo>) {
+        handles.forEach { runCatching { it.recycle() } }
     }
 }
