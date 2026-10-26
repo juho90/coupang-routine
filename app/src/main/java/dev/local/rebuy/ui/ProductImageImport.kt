@@ -42,9 +42,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.local.rebuy.domain.CoupangUrl
+import dev.local.rebuy.importproduct.ClipboardProductImage
+import dev.local.rebuy.importproduct.IncomingProductImage
 import dev.local.rebuy.importproduct.ProductImageReader
 import dev.local.rebuy.importproduct.ProductTextSuggestions
+import dev.local.rebuy.pcimport.PcImageInbox
 import java.text.NumberFormat
+import java.io.IOException
 import java.util.Locale
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException
@@ -63,51 +67,83 @@ internal fun ProductImageImport(
     enabled: Boolean,
     includeOption: Boolean = true,
     includePrice: Boolean = true,
+    readClipboardImage: (() -> Uri)? = null,
+    incomingImage: IncomingProductImage? = null,
+    onIncomingImageConsumed: () -> Unit = {},
     onApply: (ProductImageDraft) -> Unit,
 ) {
     val context = LocalContext.current
     var imageUri by rememberSaveable { mutableStateOf<String?>(null) }
     var imageSelectionId by rememberSaveable { mutableIntStateOf(0) }
+    var clipboardSource by rememberSaveable { mutableStateOf(false) }
+    var reviewKey by rememberSaveable { mutableStateOf("") }
     var suggestions by remember { mutableStateOf<ProductTextSuggestions?>(null) }
     var loading by remember { mutableStateOf(false) }
     var error by rememberSaveable { mutableStateOf<String?>(null) }
+    fun beginImageRead(uri: Uri, fromClipboard: Boolean) {
+        if (uri.scheme != "content") {
+            error = if (fromClipboard) "클립보드 이미지를 열 수 없습니다. 이미지를 다시 복사하거나 사진에서 선택해 주세요."
+                else "이 이미지를 열 수 없습니다. 사진 선택 화면에서 다른 이미지를 선택해 주세요."
+            return
+        }
+        // Keep the preceding review intact until a new read succeeds.
+        imageUri?.takeIf { it != uri.toString() }?.let { PcImageInbox.release(context, Uri.parse(it)) }
+        error = null
+        clipboardSource = fromClipboard
+        imageUri = uri.toString()
+        imageSelectionId += 1
+        loading = true
+    }
+    LaunchedEffect(incomingImage?.id, enabled) {
+        val request = incomingImage ?: return@LaunchedEffect
+        if (!enabled) return@LaunchedEffect
+        beginImageRead(request.uri, fromClipboard = false)
+        onIncomingImageConsumed()
+    }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         // Cancelling selection leaves both the existing parent form and the previous UI untouched.
-        if (uri != null && enabled) {
-            if (uri.scheme != "content") {
-                error = "이 이미지를 열 수 없습니다. 사진 선택 화면에서 다른 이미지를 선택해 주세요."
-            } else {
-                suggestions = null
-                error = null
-                imageUri = uri.toString()
-                imageSelectionId += 1
-                loading = true
-            }
-        }
+        if (uri != null && enabled) beginImageRead(uri, fromClipboard = false)
     }
     LaunchedEffect(imageUri, imageSelectionId) {
         val requestedUri = imageUri ?: return@LaunchedEffect
         val requestedSelectionId = imageSelectionId
+        val requestedClipboard = clipboardSource
         loading = true
         try {
             val result = ProductImageReader.read(context.applicationContext, Uri.parse(requestedUri))
-            if (imageUri == requestedUri && imageSelectionId == requestedSelectionId) suggestions = result
+            if (imageUri == requestedUri && imageSelectionId == requestedSelectionId) {
+                reviewKey = "$requestedUri#$requestedSelectionId"
+                suggestions = result
+            }
         } catch (_: TimeoutCancellationException) {
-            if (imageUri == requestedUri && imageSelectionId == requestedSelectionId) error = "이미지를 읽는 시간이 길어져 중단했습니다. 선명한 상품 이미지로 다시 시도해 주세요."
+            if (imageUri == requestedUri && imageSelectionId == requestedSelectionId) error = if (requestedClipboard)
+                "클립보드 이미지를 읽는 시간이 길어져 중단했습니다. 이미지를 다시 복사하거나 사진에서 선택해 주세요."
+                else "이미지를 읽는 시간이 길어져 중단했습니다. 선명한 상품 이미지로 다시 시도해 주세요."
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: SecurityException) {
-            if (imageUri == requestedUri && imageSelectionId == requestedSelectionId) error = "사진을 읽을 수 없습니다. 사진 선택 화면에서 다시 선택해 주세요."
+            if (imageUri == requestedUri && imageSelectionId == requestedSelectionId) error = if (requestedClipboard)
+                "클립보드 이미지에 접근할 수 없습니다. 이미지를 다시 복사하거나 사진에서 선택해 주세요."
+                else "사진을 읽을 수 없습니다. 사진 선택 화면에서 다시 선택해 주세요."
         } catch (invalid: IllegalArgumentException) {
-            if (imageUri == requestedUri && imageSelectionId == requestedSelectionId) error = invalid.message ?: "선택한 이미지를 읽을 수 없습니다. 다른 상품 이미지로 다시 시도해 주세요."
+            if (imageUri == requestedUri && imageSelectionId == requestedSelectionId) error = if (requestedClipboard)
+                "${invalid.message ?: "클립보드 이미지를 읽을 수 없습니다."} 이미지를 다시 복사하거나 사진에서 선택해 주세요."
+                else invalid.message ?: "선택한 이미지를 읽을 수 없습니다. 다른 상품 이미지로 다시 시도해 주세요."
+        } catch (_: IOException) {
+            if (imageUri == requestedUri && imageSelectionId == requestedSelectionId) error = if (requestedClipboard)
+                "클립보드 이미지를 읽을 수 없습니다. 이미지를 다시 복사하거나 사진에서 선택해 주세요."
+                else "사진을 읽을 수 없습니다. 사진 선택 화면에서 다시 선택해 주세요."
         } catch (_: Exception) {
-            if (imageUri == requestedUri && imageSelectionId == requestedSelectionId) error = "이미지에서 글자를 읽지 못했습니다. 선명한 상품 화면 이미지로 다시 시도해 주세요."
+            if (imageUri == requestedUri && imageSelectionId == requestedSelectionId) error = if (requestedClipboard)
+                "클립보드 이미지에서 글자를 읽지 못했습니다. 이미지를 다시 복사하거나 사진에서 선택해 주세요."
+                else "이미지에서 글자를 읽지 못했습니다. 선명한 상품 화면 이미지로 다시 시도해 주세요."
         } finally {
             if (imageUri == requestedUri && imageSelectionId == requestedSelectionId) loading = false
         }
     }
 
     fun closeReview() {
+        imageUri?.let { PcImageInbox.release(context, Uri.parse(it)) }
         imageUri = null
         suggestions = null
         loading = false
@@ -125,7 +161,25 @@ internal fun ProductImageImport(
             enabled = enabled && !loading,
             modifier = Modifier.fillMaxWidth().testTag("product-image-pick"),
         ) { Text("상품 이미지에서 읽기") }
-        Text("선택한 이미지는 기기에서 읽고 저장하지 않습니다. Google ML Kit는 성능·사용 통계를 전송할 수 있습니다.", style = MaterialTheme.typography.bodySmall)
+        OutlinedButton(
+            onClick = {
+                // Read the clipboard only in this explicit click handler, never during composition.
+                try {
+                    val uri = readClipboardImage?.invoke() ?: ClipboardProductImage.read(context)
+                    beginImageRead(uri, fromClipboard = true)
+                } catch (_: SecurityException) {
+                    error = "클립보드 이미지에 접근할 수 없습니다. 이미지를 다시 복사하거나 사진에서 선택해 주세요."
+                } catch (invalid: IllegalArgumentException) {
+                    error = "${invalid.message ?: "클립보드에 붙여넣을 이미지가 없습니다."} 이미지를 다시 복사하거나 사진에서 선택해 주세요."
+                } catch (_: Exception) {
+                    error = "클립보드 이미지를 읽을 수 없습니다. 이미지를 다시 복사하거나 사진에서 선택해 주세요."
+                }
+            },
+            enabled = enabled && !loading,
+            modifier = Modifier.fillMaxWidth().testTag("product-image-paste"),
+        ) { Text("Android 클립보드 이미지 붙여넣기") }
+        Text("PC에서 캡처했다면 PC 전송기에서 ‘클립보드 이미지 보내기’를 눌러 주세요. 이 화면으로 인식 결과를 가져옵니다.", style = MaterialTheme.typography.bodySmall)
+        Text("이미지는 기기에서 읽습니다. PC 전송본은 검토가 끝날 때까지 앱 내부에 잠시 보관합니다. Google ML Kit는 성능·사용 통계를 전송할 수 있습니다.", style = MaterialTheme.typography.bodySmall)
         if (loading) Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -140,9 +194,9 @@ internal fun ProductImageImport(
 
     suggestions?.let { result ->
         ProductImageReview(
-            key = "${imageUri.orEmpty()}#$imageSelectionId",
+            key = reviewKey,
             suggestions = result,
-            enabled = enabled,
+            enabled = enabled && !loading,
             includeOption = includeOption,
             includePrice = includePrice,
             onDismiss = ::closeReview,

@@ -51,6 +51,8 @@ class RoutineRepositoryTest {
         assertEquals("https://www.coupang.com/vp/products/123", item.productUrl)
         assertTrue(item.enabled)
         assertFalse(item.archived)
+        assertNull(item.purchaseOption)
+        assertNull(item.maxTotalWon)
         assertEquals(clock.millis(), item.createdAtEpochMillis)
         assertEquals(listOf(item), repository.items.first())
     }
@@ -207,6 +209,94 @@ class RoutineRepositoryTest {
         assertTrue(repository.items.first().isEmpty())
     }
 
+    @Test
+    fun oneSavePersistsNormalizedOptionAndLimitTogetherWithoutRestrictingRegisteredQuantity() = runTest {
+        val id = save(quantity = 999, purchaseOption = " ６００ｍｌ,\u3000２개  ", maxTotalWon = 100_000_000)
+        val item = requireNotNull(repository.getItem(id))
+        assertEquals("600ml, 2개", item.purchaseOption)
+        assertEquals(100_000_000L, item.maxTotalWon)
+        assertEquals(999, item.quantity)
+        assertEquals(listOf(item), repository.items.first())
+        assertTrue(repository.history.first().isEmpty())
+    }
+
+    @Test
+    fun partialOrInvalidPurchaseConditionsCannotCreateAnyRow() = runTest {
+        val invalid = listOf(
+            "600ml,2개" to null,
+            null to 75_000L,
+            " " to 75_000L,
+            "가" to 75_000L,
+            "!!" to 75_000L,
+            "가!" to 75_000L,
+            "가".repeat(121) to 75_000L,
+            "600ml,2개" to 0L,
+            "600ml,2개" to 100_000_001L,
+        )
+        for ((option, limit) in invalid) {
+            try {
+                save(purchaseOption = option, maxTotalWon = limit)
+                fail("Invalid purchase conditions were accepted")
+            } catch (_: IllegalArgumentException) { }
+        }
+        assertTrue(repository.items.first().isEmpty())
+    }
+
+    @Test
+    fun invalidConditionEditLeavesEveryPreviouslySavedFieldUnchanged() = runTest {
+        val id = save(purchaseOption = "600ml,2개", maxTotalWon = 75_000)
+        val before = requireNotNull(repository.getItem(id))
+        try {
+            save(id = id, title = "바뀌면 안 되는 이름", quantity = 8, purchaseOption = "600ml,3개", maxTotalWon = 0)
+            fail("Invalid limit was accepted")
+        } catch (_: IllegalArgumentException) { }
+        assertEquals(before, repository.getItem(id))
+    }
+
+    @Test
+    fun legacyEditPreservesRegisteredPurchaseConditionsAndPausedState() = runTest {
+        val id = save(purchaseOption = "600ml,2개", maxTotalWon = 75_000)
+        repository.setEnabled(id, false)
+        val before = requireNotNull(repository.getItem(id))
+        save(id = id, title = "수정한 상품명", quantity = 3)
+        val after = requireNotNull(repository.getItem(id))
+        assertEquals("수정한 상품명", after.title)
+        assertEquals(3, after.quantity)
+        assertEquals(before.purchaseOption, after.purchaseOption)
+        assertEquals(before.maxTotalWon, after.maxTotalWon)
+        assertFalse(after.enabled)
+        assertNotEquals(before.cycleId, after.cycleId)
+    }
+
+    @Test
+    fun updatedConditionsReplaceThePairAndInvalidateOldConfirmation() = runTest {
+        val id = save(purchaseOption = "600ml,2개", maxTotalWon = 75_000)
+        val before = requireNotNull(repository.getItem(id))
+        save(id = id, purchaseOption = "600ml,3개", maxTotalWon = 80_000)
+        val after = requireNotNull(repository.getItem(id))
+        assertEquals("600ml,3개", after.purchaseOption)
+        assertEquals(80_000L, after.maxTotalWon)
+        assertNotEquals(before.cycleId, after.cycleId)
+        assertEquals(CompletionResult.Stale, repository.completePurchase(id, before.cycleId))
+        assertTrue(repository.history.first().isEmpty())
+    }
+
+    @Test
+    fun failedDatabaseWriteCannotPartiallyChangeAnItemOrItsConditions() = runTest {
+        val id = save(purchaseOption = "600ml,2개", maxTotalWon = 75_000)
+        val before = requireNotNull(repository.getItem(id))
+        database.openHelper.writableDatabase.execSQL(
+            "CREATE TRIGGER reject_condition_edit BEFORE UPDATE ON routine_items " +
+                "WHEN NEW.maxTotalWon = 99999 BEGIN SELECT RAISE(ABORT, 'test condition rejection'); END",
+        )
+        val failure = runCatching {
+            save(id = id, title = "실패할 수정", purchaseOption = "600ml,3개", maxTotalWon = 99_999)
+        }.exceptionOrNull()
+        assertNotNull("The fixture constraint must reject the write", failure)
+        assertEquals(before, repository.getItem(id))
+        assertEquals(listOf(before), repository.items.first())
+    }
+
     private suspend fun save(
         id: String? = null,
         title: String = "생수",
@@ -214,7 +304,9 @@ class RoutineRepositoryTest {
         quantity: Int = 2,
         interval: Int = 7,
         due: String = "2026-10-21",
-    ) = repository.saveItem(id, title, url, quantity, interval, day(due))
+        purchaseOption: String? = null,
+        maxTotalWon: Long? = null,
+    ) = repository.saveItem(id, title, url, quantity, interval, day(due), purchaseOption, maxTotalWon)
 
     private fun day(value: String): Long = LocalDate.parse(value).toEpochDay()
 }

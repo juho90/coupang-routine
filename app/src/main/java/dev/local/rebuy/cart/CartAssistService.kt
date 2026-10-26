@@ -21,7 +21,7 @@ class CartAssistService : AccessibilityService() {
     }
 
     override fun onInterrupt() {
-        CartAssistController.cancel()
+        CartAssistController.interrupted()
         AutoBuyController.cancel()
     }
 
@@ -40,58 +40,107 @@ class CartAssistService : AccessibilityService() {
         if (inspecting) return
         inspecting = true
         try {
-            val root = rootInActiveWindow ?: return
+            val root = rootInActiveWindow ?: run {
+                CartAssistController.reportStage(current, CartAssistStage.NO_ACTIVE_WINDOW)
+                return
+            }
             val now = SystemClock.elapsedRealtime()
             // Only package metadata is inspected outside Coupang; no outside text or nodes are read.
             if (root.packageName?.toString() != CartAssistController.COUPANG_PACKAGE) {
-                if (current.coupangSeen && now - current.startedAt > 1_500) CartAssistController.cancel()
+                if (current.coupangSeen && now - current.startedAt > 1_500) {
+                    CartAssistController.reportStage(current, CartAssistStage.OUTSIDE_COUPANG)
+                    CartAssistController.finish(if (current.clickClaimed)
+                        "쿠팡 화면을 벗어나 중지했습니다. 장바구니에서 결과를 직접 확인해 주세요."
+                        else "쿠팡 화면을 벗어나 점검을 중지했습니다. 담기 버튼은 누르지 않았습니다.", false)
+                } else CartAssistController.reportStage(current, CartAssistStage.WAITING_NATIVE_APP)
                 return
             }
             current.coupangSeen = true
-            val scanned = scan(root)
+            val scan = scan(root)
+            val scanned = scan.nodes
+            val nodes = scanned.map { it.second }
+            CartAssistController.reportScan(current, nodes.size, nodes.count { it.resourceId.isNotEmpty() },
+                scan.truncated, CartAssistPolicy.detailStructure(nodes))
             if (current.clickClaimed) {
-                if (CartAssistPolicy.hasConfirmedAddition(scanned.map { it.second })) {
+                // A read-only session can never accept a previous addition popup as its result.
+                if (current.request.verifyOnly) {
+                    CartAssistController.finish("담기 전 점검의 안전 조건이 달라져 중지했습니다. 담기 버튼은 누르지 않았습니다.", false)
+                    return
+                }
+                CartAssistController.reportStage(current, CartAssistStage.WAITING_CONFIRMATION)
+                if (CartAssistPolicy.hasConfirmedAddition(nodes)) {
+                    CartAssistController.reportStage(current, CartAssistStage.CONFIRMED)
                     CartAssistController.finish("쿠팡의 담기 완료 안내를 확인했습니다. 장바구니에 1개를 추가했습니다.", true)
                 }
                 return
             }
             // Allow the native link to replace the previous detail page before considering a click.
-            if (now - current.startedAt < 1_800) return
-            val nodes = scanned.map { it.second }
-            val index = CartAssistPolicy.cartTargetIndex(nodes, current.request.expectedTitle, current.request.expectedOption)
+            if (now - current.startedAt < 1_800) {
+                CartAssistController.reportStage(current, CartAssistStage.OPENING_PRODUCT)
+                return
+            }
+            val inspection = CartAssistPolicy.inspectCartTarget(nodes, current.request.expectedTitle, current.request.expectedOption)
+            val stage = when {
+                !inspection.detailScreen -> CartAssistStage.WAITING_DETAIL_SCREEN
+                !inspection.titleMatched -> CartAssistStage.WAITING_TITLE
+                !inspection.optionMatched -> CartAssistStage.WAITING_OPTION
+                !inspection.buttonMatched -> CartAssistStage.WAITING_CART_BUTTON
+                else -> CartAssistStage.IDENTITY_STABILIZING
+            }
+            CartAssistController.reportStage(current, stage, inspection)
+            val index = inspection.targetIndex
             if (index != null) {
                 if (current.identitySeenAt == 0L) {
                     current.identitySeenAt = now
                     return
                 }
                 if (now - current.identitySeenAt < 500) return
+                if (current.request.verifyOnly) {
+                    CartAssistController.finishVerified(current)
+                    return
+                }
                 if (!CartAssistController.claimClick(current)) return
-                if (!scanned[index].first.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
-                    CartAssistController.finish("담기 버튼을 한 번 요청했지만 결과를 확인하지 못했습니다. 장바구니를 직접 확인해 주세요.", false)
+                // A second independent mode gate protects the external effect even if claimClick
+                // is changed incorrectly later. Verification never reaches ACTION_CLICK.
+                val accepted = current.performClaimedAction { scanned[index].first.performAction(AccessibilityNodeInfo.ACTION_CLICK) }
+                CartAssistController.reportClickResult(current)
+                if (!accepted) {
+                    CartAssistController.finish("담기 버튼 누르기 요청이 수락되지 않았습니다. 자동으로 다시 누르지 않습니다. 장바구니에서 결과를 확인해 주세요.", false)
                 }
                 return
             }
             current.identitySeenAt = 0
-            if (CartAssistPolicy.isDetailScreen(nodes) && current.scrollCount < 4 && now - current.lastScrollAt >= 1_200) {
-                val scroller = scanned.firstOrNull { (node, snapshot) ->
-                    snapshot.visible && snapshot.enabled && snapshot.resourceId in CartAssistPolicy.SCROLL_IDS && node.isScrollable
-                }?.first ?: return
-                current.scrollCount += 1
+            if (inspection.detailScreen && current.scrollCount < 4 && now - current.lastScrollAt >= 1_200) {
+                // Throttle even rejected requests, and spend the bound only on accepted scrolls.
                 current.lastScrollAt = now
-                // Semantic scrolling on an inspected product container only; never screen coordinates.
-                scroller.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
+                val accepted = CartAssistPolicy.requestDetailScroll(nodes,
+                    isScrollable = { scanned[it].first.isScrollable },
+                    scrollForward = { scanned[it].first.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD) },
+                )
+                if (accepted) {
+                    current.scrollCount += 1
+                    CartAssistController.reportStage(current, CartAssistStage.SCROLLING_DETAIL, inspection)
+                }
             }
         } catch (_: RuntimeException) {
-            CartAssistController.finish("쿠팡 화면을 확인하는 중 멈췄습니다. 장바구니에서 결과를 확인해 주세요.", false)
+            CartAssistController.finish(if (current.clickClaimed)
+                "쿠팡 화면을 확인하는 중 멈췄습니다. 장바구니에서 결과를 확인해 주세요."
+                else "쿠팡 화면을 읽는 중 멈췄습니다. 담기 버튼은 누르지 않았습니다.", false)
         } finally {
             inspecting = false
         }
     }
 
-    private fun scan(root: AccessibilityNodeInfo): List<Pair<AccessibilityNodeInfo, CartAssistPolicy.Node>> {
+    private data class ScanResult(val nodes: List<Pair<AccessibilityNodeInfo, CartAssistPolicy.Node>>, val truncated: Boolean)
+
+    private fun scan(root: AccessibilityNodeInfo): ScanResult {
         val result = mutableListOf<Pair<AccessibilityNodeInfo, CartAssistPolicy.Node>>()
+        var truncated = false
         fun visit(node: AccessibilityNodeInfo, parent: Int?, ancestors: List<String>, depth: Int) {
-            if (result.size >= 600 || depth > 35) return
+            if (result.size >= 600 || depth > 35) {
+                truncated = true
+                return
+            }
             if (node.packageName?.toString() != CartAssistController.COUPANG_PACKAGE) return
             val index = result.size
             val id = node.viewIdResourceName.orEmpty()
@@ -111,6 +160,6 @@ class CartAssistService : AccessibilityService() {
             }
         }
         visit(root, null, emptyList(), 0)
-        return result
+        return ScanResult(result, truncated)
     }
 }

@@ -2,6 +2,17 @@ package dev.local.rebuy.cart
 
 import java.text.Normalizer
 
+/** Presence flags only; no native text or identifiers leave the inspection boundary. */
+data class CartDetailStructure(
+    val bottomContainer: Boolean = false,
+    val buttonContainer: Boolean = false,
+    val detailContent: Boolean = false,
+    val cartLabel: Boolean = false,
+    val buyLabel: Boolean = false,
+) {
+    val complete: Boolean get() = bottomContainer && buttonContainer && detailContent && cartLabel && buyLabel
+}
+
 /** Pure, conservative rules derived from the inspected Coupang 9.4.5 accessibility tree. */
 internal object CartAssistPolicy {
     const val PREFIX = "com.coupang.mobile:id/"
@@ -10,6 +21,7 @@ internal object CartAssistPolicy {
     const val BOTTOM_BUTTONS_ID = PREFIX + "bottom_buttons_container"
     val DETAIL_CONTENT_IDS = setOf(PREFIX + "web_layout", PREFIX + "recycler_view", PREFIX + "scroller_layout")
     val SCROLL_IDS = setOf(PREFIX + "recycler_view", PREFIX + "scroller_layout")
+    private val detailScrollOrder = listOf(PREFIX + "recycler_view", PREFIX + "scroller_layout")
 
     data class Node(
         val text: String = "",
@@ -25,31 +37,97 @@ internal object CartAssistPolicy {
     fun normalize(value: String): String = Normalizer.normalize(value, Normalizer.Form.NFKC)
         .lowercase(java.util.Locale.ROOT).filter(Char::isLetterOrDigit)
 
-    fun isDetailScreen(nodes: List<Node>): Boolean =
-        nodes.any { it.visible && it.resourceId == BOTTOM_BUTTONS_ID } &&
-            nodes.any { it.visible && it.resourceId == BUTTON_LAYOUT_ID } &&
-            nodes.any { it.visible && it.resourceId in DETAIL_CONTENT_IDS } &&
-            nodes.any { it.visible && it.resourceId == CART_TEXT_ID && normalize(it.text) == "장바구니담기" && BOTTOM_BUTTONS_ID in it.ancestorIds } &&
-            nodes.any { it.visible && it.resourceId == CART_TEXT_ID && normalize(it.text) == "바로구매" && BOTTOM_BUTTONS_ID in it.ancestorIds }
+    private const val NUMBER = "[0-9]+(?:\\.[0-9]+)?"
+    private val weightMultiplication = Regex(
+        "(?<![\\p{L}\\p{N}])($NUMBER\\s*(?:밀리리터|킬로그램|밀리그램|리터|그램|kg|mg|ml|g|l)\\s*)[x×*](?=\\s*[0-9])",
+    )
+    private val numericMultiplication = Regex(
+        "(?<![\\p{L}\\p{N}])$NUMBER(?:\\s*[x×*]\\s*$NUMBER)+",
+    )
+    private val measuredOptionLabel = Regex(
+        "^\\s*(?:개당\\s*)?(?:중량|용량)\\s*[x×*]\\s*수량\\s*[:：]?\\s*(?=[0-9])",
+    )
+
+    /** Multiplication spellings are equivalent only in numeric option context, never in titles. */
+    fun normalizeOption(value: String): String {
+        val text = measuredOptionLabel.replace(
+            Normalizer.normalize(value, Normalizer.Form.NFKC).lowercase(java.util.Locale.ROOT), "",
+        )
+        val withoutWeightSeparator = weightMultiplication.replace(text) { it.groupValues[1] + " " }
+        // Keep a marker between bare numbers: 10 x 20 must not accidentally become 1020.
+        val multiplication = numericMultiplication.replace(withoutWeightSeparator) { match ->
+            match.value.replace(Regex("[x×*]"), "x")
+        }
+        return multiplication.filterIndexed { index, character ->
+            character.isLetterOrDigit() || (character == '.' &&
+                multiplication.getOrNull(index - 1)?.isDigit() == true &&
+                multiplication.getOrNull(index + 1)?.isDigit() == true)
+        }
+    }
+
+    fun detailStructure(nodes: List<Node>): CartDetailStructure = CartDetailStructure(
+        bottomContainer = nodes.any { it.visible && it.resourceId == BOTTOM_BUTTONS_ID },
+        buttonContainer = nodes.any { it.visible && it.resourceId == BUTTON_LAYOUT_ID },
+        detailContent = nodes.any { it.visible && it.resourceId in DETAIL_CONTENT_IDS },
+        cartLabel = nodes.any { it.visible && it.resourceId == CART_TEXT_ID && normalize(it.text) == "장바구니담기" && BOTTOM_BUTTONS_ID in it.ancestorIds },
+        buyLabel = nodes.any { it.visible && it.resourceId == CART_TEXT_ID && normalize(it.text) == "바로구매" && BOTTOM_BUTTONS_ID in it.ancestorIds },
+    )
+
+    fun isDetailScreen(nodes: List<Node>): Boolean = detailStructure(nodes).complete
+
+    /** At most one attempt per observed container, inner list first; true means accepted. */
+    fun requestDetailScroll(
+        nodes: List<Node>,
+        isScrollable: (Int) -> Boolean,
+        scrollForward: (Int) -> Boolean,
+    ): Boolean {
+        if (!isDetailScreen(nodes)) return false
+        for (id in detailScrollOrder) {
+            val index = nodes.indices.firstOrNull { index ->
+                val node = nodes[index]
+                node.visible && node.enabled && node.resourceId == id && isScrollable(index)
+            } ?: continue
+            if (scrollForward(index)) return true
+        }
+        return false
+    }
 
     fun cartTargetIndex(nodes: List<Node>, expectedTitle: String, expectedOption: String): Int? =
-        detailTargetIndex(nodes, expectedTitle, expectedOption, "장바구니담기")
+        inspectCartTarget(nodes, expectedTitle, expectedOption).targetIndex
 
     fun buyNowTargetIndex(nodes: List<Node>, expectedTitle: String, expectedOption: String): Int? =
-        detailTargetIndex(nodes, expectedTitle, expectedOption, "바로구매")
+        inspectDetailTarget(nodes, expectedTitle, expectedOption, "바로구매").targetIndex
 
-    private fun detailTargetIndex(nodes: List<Node>, expectedTitle: String, expectedOption: String, targetText: String): Int? {
-        if (!isDetailScreen(nodes)) return null
+    data class DetailInspection(
+        val detailScreen: Boolean,
+        val titleMatched: Boolean,
+        val optionMatched: Boolean,
+        val buttonMatched: Boolean,
+        val targetIndex: Int?,
+    )
+
+    fun inspectCartTarget(nodes: List<Node>, expectedTitle: String, expectedOption: String): DetailInspection =
+        inspectDetailTarget(nodes, expectedTitle, expectedOption, "장바구니담기")
+
+    private fun inspectDetailTarget(nodes: List<Node>, expectedTitle: String, expectedOption: String, targetText: String): DetailInspection {
+        val detailScreen = isDetailScreen(nodes)
         val title = normalize(expectedTitle)
-        val option = normalize(expectedOption)
-        if (title.length < 4 || option.length < 2) return null
+        val option = normalizeOption(expectedOption)
         // Text in headers, carts, popups, or bottom recommendations is not a product identity anchor.
         val content = nodes.filter { node ->
             node.visible && node.ancestorIds.any { it in DETAIL_CONTENT_IDS } &&
                 node.ancestorIds.none { it.contains("recommend", ignoreCase = true) }
         }
-        if (content.none { normalize(it.text) == title }) return null
-        if (content.none { normalize(it.text).removePrefix("옵션") == option }) return null
+        val titleMatched = title.length >= 4 && content.any { normalize(it.text) == title }
+        val optionMatched = option.length >= 2 && content.any {
+            normalizeOption(it.text.trim().removePrefix("옵션")).removePrefix("옵션") == option
+        }
+        val buttonIndex = if (detailScreen) strictButtonIndex(nodes, targetText) else null
+        return DetailInspection(detailScreen, titleMatched, optionMatched, buttonIndex != null,
+            buttonIndex?.takeIf { titleMatched && optionMatched })
+    }
+
+    private fun strictButtonIndex(nodes: List<Node>, targetText: String): Int? {
         val labels = nodes.withIndex().filter { (_, node) ->
             node.visible && node.enabled && node.resourceId == CART_TEXT_ID &&
                 normalize(node.text) == targetText &&

@@ -4,6 +4,58 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ProductTextParserTest {
+    @Test fun wideCoupangScreenshotPrefersFullProductTitleAndCompleteLabeledOption() {
+        val title = "동원 용기죽 4종 기획세트 쇠고기3+야채3+참치3+전복3"
+        val result = ProductTextParser.parse(listOf(
+            "양반 쇠고기죽", "양반 참치죽", "양반 전복죽", "양반 야채죽",
+            "동원", "브랜드 상품 모아보기", title,
+            "원산지: 상품 상세설명 참조", "쿠팡이 배송하고 주식회사 더가온(이)가 판매합니다.",
+            "개당 중량 × 수량 285g × 1세트", "내일 도착 보장", "리뷰 12,345개",
+        ))
+        assertEquals(title, result.titleCandidates.first())
+        assertEquals(listOf("285g × 1세트"), result.optionCandidates)
+        assertFalse(result.titleCandidates.any { it.contains("모아보기") || it.contains("원산지") || it.contains("판매합니다") || it.contains("리뷰") || it.contains("도착") })
+        // Short names remain usable alternatives; length is not a validity requirement.
+        assertTrue(result.titleCandidates.contains("양반 참치죽"))
+        assertEquals(listOf("햇반"), ProductTextParser.parse(listOf("햇반")).titleCandidates)
+    }
+
+    @Test fun labeledCapacityCountPairAcceptsExplicitMultipliersAndBoundedLineBreaks() {
+        val result = ProductTextParser.parse(listOf(
+            "개당 중량 x 수량 285gx1세트",
+            "개당 용량 × 수량", "600ml", "×", "2개",
+            "개당 무게 × 수량", "1.5kg ×", "3봉",
+        ))
+        assertEquals(listOf("285g x 1세트", "600ml × 2개", "1.5kg × 3봉"), result.optionCandidates)
+        assertTrue(result.titleCandidates.isEmpty())
+        assertEquals(listOf("285gx1세트"), ProductTextParser.parse(listOf("285gx1세트")).optionCandidates)
+    }
+
+    @Test fun incompleteLabeledPairsNeverInventAUnitOrAMultiplierOrCrossOtherText() {
+        val badUnit = ProductTextParser.parse(listOf("개당 중량 × 수량", "2859", "×", "1세트"))
+        assertTrue(badUnit.optionCandidates.isEmpty())
+        assertFalse(badUnit.optionCandidates.any { it.contains("285g") })
+        assertTrue(ProductTextParser.parse(listOf("개당 중량 × 수량", "285g", "1세트")).optionCandidates.isEmpty())
+
+        val separated = ProductTextParser.parse(listOf(
+            "개당 중량 × 수량", "285g", "추천 상품 다른 용기죽", "×", "1세트",
+        ))
+        assertFalse(separated.optionCandidates.any { it.contains("285g") && it.contains("1세트") })
+        assertTrue(separated.titleCandidates.contains("추천 상품 다른 용기죽"))
+        // A bare neighboring weight/count without a labeled field is not joined.
+        val unrelated = ProductTextParser.parse(listOf("285g", "×", "1세트"))
+        assertEquals(listOf("285g", "1세트"), unrelated.optionCandidates)
+        val otherOption = ProductTextParser.parse(listOf("개당 중량 × 수량", "285g", "500g × 2개"))
+        assertEquals(listOf("500g × 2개"), otherOption.optionCandidates)
+    }
+
+    @Test fun fullProductTitleAfterManyPackagingCandidatesStillParticipatesInRanking() {
+        val title = "동원 용기죽 4종 기획세트 쇠고기3+야채3+참치3+전복3"
+        val result = ProductTextParser.parse((1..20).map { "양반 죽 포장 $it" } + listOf("동원", "브랜드 상품 모아보기", title, "원산지: 상세설명 참조"))
+        assertEquals(title, result.titleCandidates.first())
+        assertEquals(12, result.titleCandidates.size)
+    }
+
     @Test fun extractsVisibleTitlePackagingAndSalePricesWithoutChoosingOne() {
         val result = ProductTextParser.parse(listOf(
             "익스트림 트리플 아르기닌 6200",

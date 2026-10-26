@@ -35,8 +35,14 @@ object ProductTextParser {
     private val measure = Regex(
         "(?i)(?<![0-9.,])(?:[0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)(?:\\.[0-9]+)?\\s*" +
             "(?:밀리리터|킬로그램|리터|그램|캡슐|박스|상자|세트|묶음|kg|mg|ml|g|l|ℓ|개입|개|팩|봉|병|롤|매|장|포|정|구|입)" +
-            "(?![A-Za-z가-힣])",
+            "(?=$|[^A-Za-z가-힣]|x\\s*[0-9])",
     )
+    private const val NUMBER = "(?:[0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)"
+    private const val CAPACITY_UNIT = "(?:밀리리터|킬로그램|리터|그램|kg|mg|ml|g|l|ℓ)"
+    private const val COUNT_UNIT = "(?:캡슐|박스|상자|세트|묶음|개입|개|팩|봉|병|롤|매|장|포|정|구|입)"
+    private val pairedOptionLabel = Regex("^(?:개당\\s*)?(?:중량|용량|무게)\\s*[×x]\\s*수량\\s*[:：=]?\\s*", RegexOption.IGNORE_CASE)
+    private val pairedOptionValue = Regex("^($NUMBER(?:\\.[0-9]+)?\\s*$CAPACITY_UNIT)\\s*([×x])\\s*($NUMBER\\s*$COUNT_UNIT)$", RegexOption.IGNORE_CASE)
+    private val pairedOptionFragment = Regex("^(?:[0-9.,\\s×x]|$CAPACITY_UNIT|$COUNT_UNIT)+$", RegexOption.IGNORE_CASE)
     private val optionLabel = Regex("^(?:선택\\s*옵션|상품\\s*옵션|옵션(?:\\s*선택)?|용량|구성|색상|컬러|사이즈)\\s*[:：=]?\\s*", RegexOption.IGNORE_CASE)
     private val optionPrefix = Regex("^(?:대형|중형|소형|특대|미니|기본|리필|본품|초코맛|딸기맛|바닐라맛|블랙|화이트|블루|레드)[ ,:/-]*$")
     private val nonPricePrefix = Regex(
@@ -49,8 +55,13 @@ object ProductTextParser {
     private val excludedTitle = Regex(
         "(?:도착\\s*(?:보장|예정)|무료\\s*(?:배송|반품)|배송비|배달비|할부|적립|캐시백|" +
             "장바구니|구매하기|바로\\s*구매|상품평|리뷰|옵션을?\\s*선택|선택해\\s*주세요|" +
-            "쿠폰\\s*(?:받기|적용)|다시\\s*구매|함께\\s*본\\s*상품|품절)",
+            "쿠폰\\s*(?:받기|적용)|다시\\s*구매|함께\\s*본\\s*상품|품절|" +
+            "브랜드\\s*(?:상품\\s*)?모아\\s*보기|브랜드\\s*(?:스토어|관)|" +
+            "배송하고|판매합니다|판매하는\\s*상품|배송\\s*(?:안내|정보|방법)|" +
+            "[0-9,]+\\s*명(?:이|\\s*이상)?\\s*구매)",
     )
+    private val metadataLine = Regex("^(?:원산지|제조국|생산국|제조사|제조원|판매자|판매처|평점|고객\\s*평가)(?:\\s*[:：]|\\s+|$)")
+    private val brandPrompt = Regex("브랜드\\s*(?:상품\\s*)?모아\\s*보기")
     private val optionPrompt = Regex("(?:옵션을?\\s*선택|선택해\\s*주세요)")
     private val identifierLabel = Regex("^(?:상품\\s*(?:번호|코드)|itemId|vendorItemId|productId|pId)\\s*[:：]?\\s*[0-9]", RegexOption.IGNORE_CASE)
     private val uiLabels = setOf(
@@ -60,11 +71,12 @@ object ProductTextParser {
     )
 
     fun parse(lines: List<String>): ProductTextSuggestions {
-        val titles = linkedSetOf<String>()
+        val titles = linkedMapOf<String, Int>()
         val options = linkedSetOf<String>()
         val prices = linkedSetOf<Long>()
         val urls = linkedSetOf<String>()
         val numbers = linkedSetOf<Long>()
+        val boundedLines = mutableListOf<String>()
         var totalLength = 0
 
         for (rawLine in lines.take(MAX_LINES)) {
@@ -74,7 +86,11 @@ object ProductTextParser {
             if (totalLength > MAX_TOTAL_LENGTH) break
             collectUrls(rawLine, urls)
             val line = normalize(rawLine)
-            if (line.isEmpty()) continue
+            if (line.isNotEmpty()) boundedLines += line
+        }
+        val pairedOptions = collectPairedOptions(boundedLines)
+        options += pairedOptions.values
+        for ((lineIndex, line) in boundedLines.withIndex()) {
             val amounts = money.findAll(line).toList()
             collectPrices(line, amounts, prices)
             val numberMatch = unconfirmedNumber.matchEntire(line)
@@ -87,12 +103,16 @@ object ProductTextParser {
             // A residual 'l' might be a unit or a bad OCR glyph. Do not also promote an
             // uncertain numeric line into a capacity/option suggestion.
             if (numberMatch != null) continue
+            if (lineIndex in pairedOptions.lines) continue
             val option = findOption(line, amounts.firstOrNull()?.range?.first)
             if (option != null && options.size < MAX_CANDIDATES) options += option
-            if (titles.size < MAX_CANDIDATES && isTitle(line, option, amounts.isNotEmpty())) titles += line
+            if (isTitle(line, option, amounts.isNotEmpty())) titles.putIfAbsent(line, lineIndex)
         }
         return ProductTextSuggestions(
-            titles.toList(), options.toList(), prices.toList(), urls.toList(),
+            titles.entries.sortedWith(compareByDescending<Map.Entry<String, Int>> {
+                titleScore(it.key, it.value, boundedLines)
+            }.thenBy { it.value }).take(MAX_CANDIDATES).map { it.key },
+            options.take(MAX_CANDIDATES), prices.toList(), urls.toList(),
             numbers.filterNot(prices::contains),
         )
     }
@@ -101,6 +121,52 @@ object ProductTextParser {
         Normalizer.normalize(raw, Normalizer.Form.NFKC),
         " ",
     ).trim()
+
+    private data class PairedOptions(val values: List<String>, val lines: Set<Int>)
+
+    private fun collectPairedOptions(lines: List<String>): PairedOptions {
+        val values = linkedSetOf<String>()
+        val consumed = mutableSetOf<Int>()
+        for (start in lines.indices) {
+            if (start in consumed || !pairedOptionLabel.containsMatchIn(lines[start])) continue
+            var combined = ""
+            for (end in start until minOf(start + 8, lines.size)) {
+                if (end > start && pairedOptionValue.matches(lines[end])) {
+                    val preceding = pairedOptionLabel.replaceFirst(combined, "").trim()
+                    if (preceding.isNotEmpty()) break
+                }
+                combined = (combined + " " + lines[end]).trim()
+                if (combined.length > MAX_FIELD_LENGTH + 60) break
+                val label = pairedOptionLabel.find(combined) ?: break
+                val value = combined.substring(label.range.last + 1).trim()
+                val pair = pairedOptionValue.matchEntire(value)
+                if (pair != null) {
+                    consumed += start..end
+                    val candidate = "${pair.groupValues[1]} ${pair.groupValues[2]} ${pair.groupValues[3]}"
+                    if (candidate.length <= MAX_FIELD_LENGTH && values.size < MAX_CANDIDATES) values += candidate
+                    break
+                }
+                // Only explicit labeled fragments may cross OCR line boundaries. Missing
+                // units or separators remain incomplete; they are never repaired or guessed.
+                if (value.isEmpty() || pairedOptionFragment.matches(value)) consumed += start..end
+                else break
+            }
+        }
+        return PairedOptions(values.toList(), consumed)
+    }
+
+    private fun titleScore(line: String, index: Int, lines: List<String>): Int {
+        // Use product detail evidence as well as text information. Length alone would
+        // favor seller notices or repeated packaging text over the actual product name.
+        var score = line.count(Char::isLetter).coerceAtMost(60)
+        score += line.split(' ').count { token -> token.any(Char::isLetter) }.coerceAtMost(8) * 4
+        if (line.any(Char::isDigit)) score += 8
+        if (line.count { it == '+' } >= 2) score += 12
+        if (index > 0 && brandPrompt.containsMatchIn(lines[index - 1])) score += 35
+        if (lines.getOrNull(index + 1)?.let(metadataLine::containsMatchIn) == true) score += 15
+        if (lines.getOrNull(index + 1)?.let(brandPrompt::containsMatchIn) == true) score -= 30
+        return score
+    }
 
     private fun collectUrls(raw: String, urls: MutableSet<String>) {
         if (urls.size >= MAX_URLS) return
@@ -136,6 +202,7 @@ object ProductTextParser {
 
     private fun findOption(line: String, firstPriceAt: Int?): String? {
         if (optionPrompt.containsMatchIn(line)) return null
+        if (pairedOptionLabel.containsMatchIn(line) || metadataLine.containsMatchIn(line)) return null
         if (excludedTitle.containsMatchIn(line) && !line.startsWith("옵션") && !line.startsWith("구성") && !line.startsWith("용량")) return null
         val priceFree = line.substring(0, firstPriceAt ?: line.length).trimEnd(' ', ',', '|', '/', '(', ':')
         val label = optionLabel.find(priceFree)
@@ -159,7 +226,7 @@ object ProductTextParser {
         if (visibleUrl.containsMatchIn(line) || line.contains("http", ignoreCase = true)) return false
         if (line.any { it.isISOControl() || it == '\uFFFD' }) return false
         if (line.count(Char::isLetter) < 2 || uiLabels.contains(line.replace(" ", ""))) return false
-        if (excludedTitle.containsMatchIn(line) || optionLabel.containsMatchIn(line) || identifierLabel.containsMatchIn(line)) return false
+        if (excludedTitle.containsMatchIn(line) || metadataLine.containsMatchIn(line) || optionLabel.containsMatchIn(line) || identifierLabel.containsMatchIn(line)) return false
         val firstDigit = line.indexOfFirst(Char::isDigit).let { if (it < 0) line.length else it }
         if (option != null && (line == option || measure.find(line)?.range?.first == 0 || optionPrefix.matches(line.take(firstDigit).trim()))) return false
         return true

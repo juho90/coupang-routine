@@ -165,6 +165,22 @@ class AutoBuyStoreTest {
         assertNotNull(store.claimAttempt(item, profile, dryRun = true))
     }
 
+    @Test fun registeredConditionsRejectAnOldProfileBeforeCreatingAnyAttempt() = runBlocking {
+        val item = item().copy(purchaseOption = "600ml, 2개", maxTotalWon = 80_000)
+        listOf(
+            profile(item).copy(expectedTitle = "이전 상품명"),
+            profile(item).copy(expectedOption = "600ml, 1개"),
+            profile(item).copy(maxTotalWon = 90_000),
+        ).forEach { stale ->
+            val saved = store.saveProfile(stale)
+            expectInvalid { store.claimAttempt(item, saved, dryRun = true) }
+        }
+        assertTrue(store.attempts.first().isEmpty())
+        val current = store.saveProfile(profile(item))
+        assertNotNull(store.claimAttempt(item, current, dryRun = true))
+        assertFalse(AutoBuyPolicy.ACTUAL_PURCHASE_ENABLED)
+    }
+
     private suspend fun expectInvalid(block: suspend () -> Unit) {
         try {
             block()

@@ -117,7 +117,26 @@ object ProductImageReader {
     }
 
     /** Ownership transfers here; the native task releases the bitmap even after UI cancellation. */
-    internal suspend fun recognizeOwnedBitmap(bitmap: Bitmap): ProductTextSuggestions =
+    internal suspend fun recognizeOwnedBitmap(bitmap: Bitmap): ProductTextSuggestions {
+        var owned: Bitmap? = bitmap
+        try {
+            withContext(Dispatchers.IO) {
+                val source = checkNotNull(owned)
+                val size = ProductOcrLayout.recognitionSize(source.width, source.height)
+                if (size.width != source.width || size.height != source.height) {
+                    val scaled = Bitmap.createScaledBitmap(source, size.width, size.height, true)
+                    owned = scaled // Assign before leaving IO, including cancellation at its boundary.
+                    if (scaled !== source) source.recycle()
+                }
+            }
+            currentCoroutineContext().ensureActive()
+            val nativeOwned = checkNotNull(owned)
+            owned = null
+            return recognizePreparedOwnedBitmap(nativeOwned)
+        } finally { owned?.recycle() }
+    }
+
+    private suspend fun recognizePreparedOwnedBitmap(bitmap: Bitmap): ProductTextSuggestions =
         suspendCancellableCoroutine { continuation ->
             val recognizer = try {
                 TextRecognition.getClient(KoreanTextRecognizerOptions.Builder().build())
@@ -131,17 +150,21 @@ object ProductImageReader {
                     try {
                         if (continuation.isActive) {
                             if (task.isSuccessful) {
-                                val lines = task.result.textBlocks.flatMap { it.lines }.map { it.text }
-                                continuation.resume(ProductTextParser.parse(lines))
+                                val lines = task.result.textBlocks.flatMap { it.lines }.map { line ->
+                                    val box = line.boundingBox
+                                    ProductOcrLayout.Line(line.text, box?.let {
+                                        ProductOcrLayout.Box(it.left, it.top, it.right, it.bottom)
+                                    })
+                                }
+                                continuation.resume(ProductTextParser.parse(ProductOcrLayout.linesForParsing(lines)))
                             } else continuation.resumeWithException(task.exception ?: IllegalStateException("글자를 읽지 못했습니다."))
                         }
                     } catch (failure: Exception) {
                         if (continuation.isActive) continuation.resumeWithException(failure)
-                    } finally { recognizer.close(); bitmap.recycle() }
+                    } finally { try { recognizer.close() } finally { bitmap.recycle() } }
                 }
             } catch (failure: Exception) {
-                recognizer.close()
-                bitmap.recycle()
+                try { recognizer.close() } finally { bitmap.recycle() }
                 if (continuation.isActive) continuation.resumeWithException(failure)
             }
         }

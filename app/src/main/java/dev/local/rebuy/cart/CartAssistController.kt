@@ -3,8 +3,7 @@ package dev.local.rebuy.cart
 import android.accessibilityservice.AccessibilityServiceInfo
 import android.content.ComponentName
 import android.content.Context
-import android.content.Intent
-import android.net.Uri
+import android.content.SharedPreferences
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -12,20 +11,64 @@ import android.view.accessibility.AccessibilityManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import java.net.URI
 import java.util.UUID
+import dev.local.rebuy.ProductLauncher
 import dev.local.rebuy.autobuy.AutoBuyController
+import dev.local.rebuy.domain.CoupangCartProductLink
 
 data class CartAssistRequest(
-    val nativeUri: String,
+    val productUrl: String,
     val expectedTitle: String,
     val expectedOption: String,
+    val verifyOnly: Boolean = false,
 )
+
+enum class CartAssistStage {
+    IDLE, OPENING_PRODUCT, WAITING_NATIVE_APP, NO_ACTIVE_WINDOW, OUTSIDE_COUPANG,
+    WAITING_DETAIL_SCREEN, WAITING_TITLE, WAITING_OPTION, WAITING_CART_BUTTON,
+    IDENTITY_STABILIZING, SCROLLING_DETAIL, VERIFIED, CLICK_CLAIMED,
+    WAITING_CONFIRMATION, CONFIRMED, CANCELLED, TIMED_OUT, FAILED,
+}
+
+enum class CartAssistStopReason {
+    NONE, USER_CANCEL, ACCESSIBILITY_INTERRUPTED, SERVICE_DISCONNECTED, TIMEOUT, OTHER,
+}
+
+/** Safe diagnostics only: never native screen text, addresses, account data, or product identifiers. */
+data class CartAssistDiagnostics(
+    val stage: CartAssistStage = CartAssistStage.IDLE,
+    val verifyOnly: Boolean = false,
+    val elapsedMillis: Long = 0,
+    val scrollCount: Int = 0,
+    val titleMatched: Boolean = false,
+    val optionMatched: Boolean = false,
+    val buttonMatched: Boolean = false,
+    val lastActiveStage: CartAssistStage? = null,
+    val stopReason: CartAssistStopReason = CartAssistStopReason.NONE,
+    val detailStructure: CartDetailStructure? = null,
+    val scannedNodeCount: Int = 0,
+    val resourceIdNodeCount: Int = 0,
+    val scanTruncated: Boolean = false,
+    val clickClaimed: Boolean = false,
+    val clickAccepted: Boolean? = null,
+    val hasClickRecord: Boolean = true,
+) {
+    internal fun atStage(next: CartAssistStage, reason: CartAssistStopReason = stopReason): CartAssistDiagnostics = copy(
+        stage = next,
+        lastActiveStage = if (next in terminalStages) lastActiveStage else next,
+        stopReason = reason,
+    )
+
+    private companion object {
+        val terminalStages = setOf(CartAssistStage.VERIFIED, CartAssistStage.CONFIRMED,
+            CartAssistStage.CANCELLED, CartAssistStage.TIMED_OUT, CartAssistStage.FAILED)
+    }
+}
 
 sealed interface CartAssistState {
     data object Idle : CartAssistState
     data class Running(val message: String) : CartAssistState
-    data class Finished(val message: String, val success: Boolean) : CartAssistState
+    data class Finished(val message: String, val success: Boolean, val verifiedOnly: Boolean = false) : CartAssistState
 }
 
 /** One explicit foreground request only. Sessions are never restored or scheduled in the background. */
@@ -35,6 +78,8 @@ object CartAssistController {
     private val handler = Handler(Looper.getMainLooper())
     private val mutableState = MutableStateFlow<CartAssistState>(CartAssistState.Idle)
     val state: StateFlow<CartAssistState> = mutableState.asStateFlow()
+    private val mutableDiagnostics = MutableStateFlow(CartAssistDiagnostics())
+    val diagnostics: StateFlow<CartAssistDiagnostics> = mutableDiagnostics.asStateFlow()
 
     private var service: CartAssistService? = null
     private var session: Session? = null
@@ -46,16 +91,49 @@ object CartAssistController {
         val startedAt: Long = SystemClock.elapsedRealtime(),
         var coupangSeen: Boolean = false,
         var clickClaimed: Boolean = false,
+        var clickAccepted: Boolean? = null,
         var scrollCount: Int = 0,
         var lastScrollAt: Long = 0,
         var identitySeenAt: Long = 0,
-    )
+    ) {
+        private var actionStarted = false
+        /** Claims before any external effect, and refuses read-only requests before persistence. */
+        fun claimBeforeEffect(persistClaim: () -> Boolean): Boolean {
+            if (request.verifyOnly || clickClaimed) return false
+            clickClaimed = true
+            return persistClaim()
+        }
+
+        /** Independent last gate at the service action boundary, including a mistaken claim. */
+        fun performClaimedAction(action: () -> Boolean): Boolean {
+            if (request.verifyOnly || !clickClaimed || actionStarted) return false
+            actionStarted = true
+            return action().also { clickAccepted = it }
+        }
+
+        fun resultStatus(success: Boolean): String = when {
+            !success -> "stopped"
+            request.verifyOnly -> "verified"
+            else -> "confirmed"
+        }
+    }
 
     private val timeout = Runnable {
         val current = session ?: return@Runnable
+        val lastStage = diagnostics.value.stage
+        val stageMessage = when (lastStage) {
+            CartAssistStage.OPENING_PRODUCT, CartAssistStage.WAITING_NATIVE_APP -> "쿠팡 네이티브 앱 화면을 확인하지 못했습니다. 브라우저만 열렸는지 확인해 주세요."
+            CartAssistStage.NO_ACTIVE_WINDOW -> "접근성에서 현재 화면을 읽지 못했습니다."
+            CartAssistStage.WAITING_DETAIL_SCREEN -> "쿠팡 상품 상세 화면의 구조를 확인하지 못했습니다."
+            CartAssistStage.WAITING_TITLE -> "상품 상세 화면에서 등록한 상품명을 확인하지 못했습니다."
+            CartAssistStage.WAITING_OPTION -> "상품명은 확인했지만 등록한 옵션을 확인하지 못했습니다."
+            CartAssistStage.WAITING_CART_BUTTON -> "상품명과 옵션은 확인했지만 담기 버튼의 구조를 확인하지 못했습니다."
+            else -> "상품명·옵션과 담기 버튼을 확인하지 못했습니다."
+        }
+        reportStage(current, CartAssistStage.TIMED_OUT, stopReason = CartAssistStopReason.TIMEOUT)
         finish(
             if (current.clickClaimed) "결과 확인 필요: 쿠팡 장바구니를 직접 확인해 주세요. 자동으로 다시 누르지 않습니다."
-            else "상품명·옵션과 담기 버튼을 확인하지 못해 멈췄습니다. 쿠팡에서 직접 확인해 주세요.",
+            else "$stageMessage 담기 버튼은 누르지 않았습니다.",
             false,
         )
     }
@@ -77,26 +155,30 @@ object CartAssistController {
         }
     }
 
-    /** Must be called from an explicit UI confirmation; this always means one additional cart unit. */
+    /** Explicit UI action only. verifyOnly checks the same screen without requesting cart addition. */
     fun start(context: Context, request: CartAssistRequest): Boolean {
         check(Looper.myLooper() == Looper.getMainLooper())
         if (session != null || AutoBuyController.isActive()) return false
         appContext = context.applicationContext
         if (!validRequest(request)) return reject("상품 주소와 화면에 표시되는 상품명·옵션을 확인해 주세요.")
-        if (!isEnabled(context) || service == null) {
+        if (!isEnabled(context)) {
             return reject("접근성 설정에서 다시담기 장바구니 도우미를 직접 켠 뒤 다시 시도해 주세요.")
         }
+        if (service == null) return reject("접근성 권한은 켜져 있지만 도우미 연결이 끊겼습니다. 앱 업데이트·강제 종료 뒤 발생할 수 있습니다. 잠시 기다린 뒤에도 계속되면 접근성 설정에서 도우미를 껐다 켜 주세요.")
         val current = Session(UUID.randomUUID().toString(), request)
-        if (!persist(current.id, "armed")) return reject("중복 처리 방지 기록을 저장하지 못해 시작하지 않았습니다.")
+        mutableDiagnostics.value = CartAssistDiagnostics(CartAssistStage.OPENING_PRODUCT, request.verifyOnly,
+            lastActiveStage = CartAssistStage.OPENING_PRODUCT)
+        if (!persist(current.id, if (request.verifyOnly) "verifying" else "armed", request.verifyOnly)) return reject("중복 처리 방지 기록을 저장하지 못해 시작하지 않았습니다.")
         session = current
-        mutableState.value = CartAssistState.Running("쿠팡에서 상품명·옵션과 장바구니 담기 버튼을 확인하고 있습니다.")
+        mutableState.value = CartAssistState.Running(if (request.verifyOnly)
+            "담기 전 점검 중입니다. 상품명·옵션·버튼만 확인하며 장바구니에 추가하지 않습니다."
+            else "쿠팡에서 상품명·옵션과 장바구니 담기 버튼을 확인하고 있습니다.")
         return try {
-            context.startActivity(
-                Intent(Intent.ACTION_VIEW, Uri.parse(request.nativeUri))
-                    .addCategory(Intent.CATEGORY_BROWSABLE)
-                    .setPackage(COUPANG_PACKAGE)
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-            )
+            // A cart session requires a resolved product address and Coupang's native app.
+            if (!ProductLauncher.openInCoupang(context, request.productUrl, newTask = true)) {
+                finish("쿠팡 상품 링크를 열지 못했습니다. 상품 주소와 쿠팡 앱 설치를 확인해 주세요.", false)
+                return false
+            }
             handler.postDelayed(timeout, TIMEOUT_MS)
             handler.postDelayed(inspect, 500)
             true
@@ -106,12 +188,22 @@ object CartAssistController {
         }
     }
 
-    fun cancel() {
+    fun cancel() = stop(CartAssistStopReason.USER_CANCEL)
+
+    internal fun interrupted() = stop(CartAssistStopReason.ACCESSIBILITY_INTERRUPTED)
+
+    private fun stop(reason: CartAssistStopReason) {
         check(Looper.myLooper() == Looper.getMainLooper())
         val current = session ?: return
+        reportStage(current, CartAssistStage.CANCELLED, stopReason = reason)
         finish(
-            if (current.clickClaimed) "중지했습니다. 이미 담기 버튼을 눌렀으므로 장바구니에서 결과를 확인해 주세요."
-            else "장바구니 도우미를 중지했습니다.",
+            when {
+                current.clickAccepted == true -> "중지했습니다. Android가 담기 버튼 클릭 요청을 수락했으므로 장바구니에서 결과를 확인해 주세요."
+                current.clickClaimed -> "중지했습니다. 담기 요청의 결과를 확인하지 못했습니다. 자동으로 다시 누르지 않습니다."
+                reason == CartAssistStopReason.ACCESSIBILITY_INTERRUPTED -> "접근성 서비스가 중단되어 멈췄습니다. 담기 버튼은 누르지 않았습니다."
+                reason == CartAssistStopReason.SERVICE_DISCONNECTED -> "접근성 서비스 연결이 끊겨 멈췄습니다. 담기 버튼은 누르지 않았습니다."
+                else -> "장바구니 도우미를 중지했습니다."
+            },
             false,
         )
     }
@@ -119,11 +211,13 @@ object CartAssistController {
     internal fun connected(service: CartAssistService) {
         this.service = service
         appContext = service.applicationContext
+        restoreDiagnostics(service)
         // A process restart never resumes an old request, especially one already sent to Coupang.
         val previous = service.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString("status", null)
-        if (session == null && previous in setOf("armed", "click_claimed")) {
+        if (session == null && previous in setOf("armed", "click_claimed", "verifying")) {
             mutableState.value = CartAssistState.Finished(
-                "이전 실행이 중단됐습니다. 쿠팡 장바구니에서 결과를 확인해 주세요. 자동으로 다시 실행하지 않습니다.",
+                if (previous == "verifying") "이전 담기 전 점검이 중단됐습니다. 점검은 자동으로 다시 실행하지 않습니다."
+                else "이전 실행이 중단됐습니다. 쿠팡 장바구니에서 결과를 확인해 주세요. 자동으로 다시 실행하지 않습니다.",
                 false,
             )
         }
@@ -131,22 +225,58 @@ object CartAssistController {
 
     internal fun disconnected(service: CartAssistService) {
         if (this.service !== service) return
-        if (session != null) cancel()
+        if (session != null) stop(CartAssistStopReason.SERVICE_DISCONNECTED)
         this.service = null
     }
 
     internal fun currentSession(): Session? = session
 
     internal fun claimClick(current: Session): Boolean {
-        if (session !== current || current.clickClaimed) return false
+        if (current.request.verifyOnly || session !== current || current.clickClaimed) return false
         // Claim in memory before disk or the external effect; event re-entry cannot click twice.
-        current.clickClaimed = true
-        if (!persist(current.id, "click_claimed")) {
+        if (!current.claimBeforeEffect { persist(current.id, "click_claimed", false) }) {
+            reportStage(current, CartAssistStage.CLICK_CLAIMED)
             finish("중복 처리 방지 기록을 저장하지 못해 담기 버튼을 누르지 않았습니다.", false)
             return false
         }
-        mutableState.value = CartAssistState.Running("담기 버튼을 한 번 눌렀습니다. 쿠팡의 완료 안내를 확인하고 있습니다.")
+        reportStage(current, CartAssistStage.CLICK_CLAIMED)
+        mutableState.value = CartAssistState.Running("담기 요청을 준비했습니다. 쿠팡 버튼의 응답을 확인하고 있습니다.")
         return true
+    }
+
+    internal fun reportClickResult(current: Session) {
+        if (session !== current) return
+        reportStage(current, if (current.clickAccepted == true) CartAssistStage.WAITING_CONFIRMATION else CartAssistStage.CLICK_CLAIMED)
+        if (current.clickAccepted == true) mutableState.value = CartAssistState.Running(
+            "Android가 담기 버튼 클릭 요청을 수락했습니다. 담기 완료 안내를 확인하고 있습니다.")
+    }
+
+    internal fun reportScan(current: Session, nodeCount: Int, resourceIdCount: Int,
+        truncated: Boolean, structure: CartDetailStructure) {
+        if (session !== current) return
+        updateDiagnostics(mutableDiagnostics.value.copy(scannedNodeCount = nodeCount,
+            resourceIdNodeCount = resourceIdCount, scanTruncated = truncated, detailStructure = structure))
+    }
+
+    internal fun finishVerified(current: Session) {
+        if (session !== current || !current.request.verifyOnly || current.clickClaimed) return
+        reportStage(current, CartAssistStage.VERIFIED)
+        finish("담기 전 점검을 마쳤습니다. 상품명·옵션·담기 버튼을 확인했으며 장바구니에는 추가하지 않았습니다.", true)
+    }
+
+    internal fun reportStage(current: Session, stage: CartAssistStage, inspection: CartAssistPolicy.DetailInspection? = null,
+        stopReason: CartAssistStopReason = CartAssistStopReason.NONE) {
+        if (session !== current) return
+        val previous = mutableDiagnostics.value
+        val next = previous.atStage(stage, stopReason).copy(
+            verifyOnly = current.request.verifyOnly, elapsedMillis = SystemClock.elapsedRealtime() - current.startedAt,
+            scrollCount = current.scrollCount,
+            titleMatched = inspection?.titleMatched ?: previous.titleMatched,
+            optionMatched = inspection?.optionMatched ?: previous.optionMatched,
+            buttonMatched = inspection?.buttonMatched ?: previous.buttonMatched,
+            clickClaimed = current.clickClaimed, clickAccepted = current.clickAccepted,
+        )
+        updateDiagnostics(next)
     }
 
     internal fun finish(message: String, success: Boolean) {
@@ -154,8 +284,13 @@ object CartAssistController {
         session = null
         handler.removeCallbacks(timeout)
         handler.removeCallbacks(inspect)
-        persist(current.id, if (success) "confirmed" else "stopped")
-        mutableState.value = CartAssistState.Finished(message, success)
+        if (!success && diagnostics.value.stage !in setOf(CartAssistStage.CANCELLED, CartAssistStage.TIMED_OUT, CartAssistStage.OUTSIDE_COUPANG)) {
+            mutableDiagnostics.value = diagnostics.value.atStage(CartAssistStage.FAILED, CartAssistStopReason.OTHER)
+        } else if (!success && diagnostics.value.stopReason == CartAssistStopReason.NONE) {
+            mutableDiagnostics.value = diagnostics.value.copy(stopReason = CartAssistStopReason.OTHER)
+        }
+        persist(current.id, current.resultStatus(success), current.request.verifyOnly)
+        mutableState.value = CartAssistState.Finished(message, success, verifiedOnly = success && current.request.verifyOnly)
     }
 
     private fun reject(message: String): Boolean {
@@ -163,20 +298,77 @@ object CartAssistController {
         return false
     }
 
-    private fun persist(id: String, status: String): Boolean =
+    /** Restore a summary only. No session, timer, link opening, or action is ever restored. */
+    fun restoreDiagnostics(context: Context) {
+        if (session != null) return
+        appContext = context.applicationContext
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val stage = prefs.getString("stage", null)?.let { enumValueOrNull<CartAssistStage>(it) } ?: return
+        val structure = if (prefs.getBoolean("structure_present", false)) CartDetailStructure(
+            prefs.getBoolean("structure_bottom", false), prefs.getBoolean("structure_buttons", false),
+            prefs.getBoolean("structure_content", false), prefs.getBoolean("structure_cart", false),
+            prefs.getBoolean("structure_buy", false),
+        ) else null
+        var restored = CartAssistDiagnostics(
+            stage = stage, verifyOnly = prefs.getBoolean("verify_only", false),
+            elapsedMillis = prefs.getLong("elapsed_ms", 0).coerceAtLeast(0),
+            scrollCount = prefs.getInt("scroll_count", 0).coerceIn(0, 4),
+            titleMatched = prefs.getBoolean("title_matched", false), optionMatched = prefs.getBoolean("option_matched", false),
+            buttonMatched = prefs.getBoolean("button_matched", false),
+            lastActiveStage = prefs.getString("last_active_stage", null)?.let { enumValueOrNull<CartAssistStage>(it) },
+            stopReason = prefs.getString("stop_reason", null)?.let { enumValueOrNull<CartAssistStopReason>(it) }
+                ?: if (stage == CartAssistStage.TIMED_OUT) CartAssistStopReason.TIMEOUT else CartAssistStopReason.NONE,
+            detailStructure = structure, scannedNodeCount = prefs.getInt("scanned_nodes", 0).coerceIn(0, 600),
+            resourceIdNodeCount = prefs.getInt("resource_id_nodes", 0).coerceIn(0, 600),
+            scanTruncated = prefs.getBoolean("scan_truncated", false), clickClaimed = prefs.getBoolean("click_claimed", false),
+            clickAccepted = if (prefs.contains("click_accepted")) prefs.getBoolean("click_accepted", false) else null,
+            hasClickRecord = prefs.contains("click_claimed"),
+        )
+        if (prefs.getString("status", null) in setOf("armed", "click_claimed", "verifying")) {
+            restored = restored.atStage(CartAssistStage.CANCELLED, CartAssistStopReason.SERVICE_DISCONNECTED)
+        }
+        mutableDiagnostics.value = restored
+    }
+
+    private inline fun <reified T : Enum<T>> enumValueOrNull(value: String): T? =
+        enumValues<T>().firstOrNull { it.name == value }
+
+    private fun updateDiagnostics(next: CartAssistDiagnostics) {
+        val previous = mutableDiagnostics.value
+        mutableDiagnostics.value = next
+        if (next.copy(elapsedMillis = previous.elapsedMillis) != previous) {
+            appContext?.getSharedPreferences(PREFS, Context.MODE_PRIVATE)?.edit()?.also {
+                writeDiagnostics(it, next)
+            }?.apply()
+        }
+    }
+
+    private fun writeDiagnostics(editor: SharedPreferences.Editor, snapshot: CartAssistDiagnostics) {
+        editor.putString("stage", snapshot.stage.name).putString("last_active_stage", snapshot.lastActiveStage?.name)
+            .putString("stop_reason", snapshot.stopReason.name).putLong("elapsed_ms", snapshot.elapsedMillis)
+            .putBoolean("verify_only", snapshot.verifyOnly).putBoolean("title_matched", snapshot.titleMatched)
+            .putBoolean("option_matched", snapshot.optionMatched).putBoolean("button_matched", snapshot.buttonMatched)
+            .putInt("scroll_count", snapshot.scrollCount).putInt("scanned_nodes", snapshot.scannedNodeCount)
+            .putInt("resource_id_nodes", snapshot.resourceIdNodeCount).putBoolean("scan_truncated", snapshot.scanTruncated)
+            .putBoolean("structure_present", snapshot.detailStructure != null)
+        if (snapshot.hasClickRecord) editor.putBoolean("click_claimed", snapshot.clickClaimed) else editor.remove("click_claimed")
+        if (snapshot.clickAccepted == null) editor.remove("click_accepted") else editor.putBoolean("click_accepted", snapshot.clickAccepted)
+        val structure = snapshot.detailStructure ?: CartDetailStructure()
+        editor.putBoolean("structure_bottom", structure.bottomContainer).putBoolean("structure_buttons", structure.buttonContainer)
+            .putBoolean("structure_content", structure.detailContent).putBoolean("structure_cart", structure.cartLabel)
+            .putBoolean("structure_buy", structure.buyLabel)
+    }
+
+    private fun persist(id: String, status: String, verifyOnly: Boolean): Boolean =
         appContext?.getSharedPreferences(PREFS, Context.MODE_PRIVATE)?.edit()
-            ?.putString("attempt_id", id)?.putString("status", status)?.commit() == true
+            ?.putString("attempt_id", id)?.putString("status", status)?.putBoolean("verify_only", verifyOnly)
+            ?.also { writeDiagnostics(it, diagnostics.value.copy(clickClaimed = session?.clickClaimed ?: diagnostics.value.clickClaimed)) }
+            ?.commit() == true
 
     internal fun validRequest(request: CartAssistRequest): Boolean = runCatching {
-        val uri = URI(request.nativeUri)
-        val params = uri.rawQuery.orEmpty().split('&').map { it.split('=', limit = 2) }
-        val expectedKeys = setOf("pId", "itemId", "vendorItemId")
-        uri.scheme == "coupang" && uri.host == "product" && uri.rawAuthority == "product" &&
-            uri.rawPath.orEmpty().isEmpty() && uri.rawFragment == null &&
-            params.size == 3 && params.map { it.first() }.toSet() == expectedKeys &&
-            params.all { it.size == 2 && it[1].matches(Regex("[1-9][0-9]{0,24}")) } &&
-            CartAssistPolicy.normalize(request.expectedTitle).length >= 4 &&
-            CartAssistPolicy.normalize(request.expectedOption).length >= 2 &&
+        CoupangCartProductLink.parse(request.productUrl)
+        CartAssistPolicy.normalize(request.expectedTitle).length >= 4 &&
+            CartAssistPolicy.normalizeOption(request.expectedOption).length >= 2 &&
             request.expectedTitle.length <= 250 && request.expectedOption.length <= 120
     }.getOrDefault(false)
 

@@ -7,6 +7,7 @@ import dev.local.rebuy.domain.PurchaseSchedule
 import java.time.Clock
 import java.time.Instant
 import java.util.UUID
+import java.text.Normalizer
 import kotlinx.coroutines.flow.Flow
 
 class RoutineRepository(
@@ -34,6 +35,8 @@ class RoutineRepository(
         quantity: Int,
         intervalDays: Int,
         nextPurchaseEpochDay: Long,
+        purchaseOption: String? = null,
+        maxTotalWon: Long? = null,
     ): String {
         val cleanTitle = title.trim()
         require(cleanTitle.length in 1..100) { "상품명은 1~100자로 입력해 주세요." }
@@ -41,6 +44,18 @@ class RoutineRepository(
         require(intervalDays in 1..365) { "구매 주기는 1~365일로 입력해 주세요." }
         PurchaseSchedule.requireValidDate(nextPurchaseEpochDay)
         val cleanUrl = CoupangUrl.normalize(productUrl)
+        require((purchaseOption == null) == (maxTotalWon == null)) {
+            "구매 옵션과 총 결제 한도를 함께 입력해 주세요."
+        }
+        val cleanOption = purchaseOption?.let { raw ->
+            Normalizer.normalize(raw, Normalizer.Form.NFKC).replace(Regex("[\\s\\p{Z}]+"), " ").trim().also {
+                require(it.length in 2..120) { "구매 옵션은 2~120자로 입력해 주세요." }
+                require(it.count(Char::isLetterOrDigit) >= 2) { "구매 옵션에 글자나 숫자를 2자 이상 입력해 주세요." }
+            }
+        }
+        if (maxTotalWon != null) require(maxTotalWon in 1..100_000_000) {
+            "총 결제 한도는 1원~1억원으로 입력해 주세요."
+        }
         return database.withTransaction {
             val now = effectiveClock().millis()
             if (id == null) {
@@ -52,6 +67,8 @@ class RoutineRepository(
                     nextPurchaseEpochDay = nextPurchaseEpochDay,
                     createdAtEpochMillis = now,
                     updatedAtEpochMillis = now,
+                    purchaseOption = cleanOption,
+                    maxTotalWon = maxTotalWon,
                 )
                 routineDao.insert(item)
                 item.id
@@ -67,6 +84,9 @@ class RoutineRepository(
                         nextPurchaseEpochDay = nextPurchaseEpochDay,
                         cycleId = UUID.randomUUID().toString(),
                         updatedAtEpochMillis = now,
+                        // Older callers omit both arguments; preserve previously registered conditions.
+                        purchaseOption = cleanOption ?: item.purchaseOption,
+                        maxTotalWon = maxTotalWon ?: item.maxTotalWon,
                     ),
                 )
                 id

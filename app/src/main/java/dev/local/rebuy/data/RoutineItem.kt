@@ -1,6 +1,7 @@
 package dev.local.rebuy.data
 
 import androidx.room.Entity
+import androidx.room.ColumnInfo
 import androidx.room.Index
 import androidx.room.PrimaryKey
 import java.util.UUID
@@ -21,4 +22,6 @@ data class RoutineItem(
     val archived: Boolean = false,
     val createdAtEpochMillis: Long = System.currentTimeMillis(),
     val updatedAtEpochMillis: Long = createdAtEpochMillis,
+    @ColumnInfo(defaultValue = "NULL") val purchaseOption: String? = null,
+    @ColumnInfo(defaultValue = "NULL") val maxTotalWon: Long? = null,
 )

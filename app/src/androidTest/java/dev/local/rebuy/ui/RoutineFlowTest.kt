@@ -48,6 +48,8 @@ class RoutineFlowTest {
             compose.onNodeWithTag("add-product").assertIsDisplayed().performClick()
             compose.onNodeWithText("상품명").performScrollTo().performTextInput(title)
             compose.onNodeWithText("쿠팡 상품 URL").performScrollTo().performTextInput("https://www.coupang.com/vp/products/123456789")
+            compose.onNodeWithTag("purchase-option").performScrollTo().performTextInput("2L, 6개입")
+            compose.onNodeWithTag("purchase-limit").performScrollTo().performTextInput("18000")
             compose.onNodeWithText("구매 수량").performScrollTo().performTextClearance()
             compose.onNodeWithText("구매 수량").performTextInput("2")
             compose.onNodeWithText("구매 주기").performScrollTo().performTextClearance()
@@ -64,6 +66,8 @@ class RoutineFlowTest {
             val original = requireNotNull(created)
             assertEquals(2, original.quantity)
             assertEquals(7, original.intervalDays)
+            assertEquals("2L, 6개입", original.purchaseOption)
+            assertEquals(18_000L, original.maxTotalWon)
             val earliestNextDate = LocalDate.now().plusDays(7).toEpochDay()
             val card = hasTestTag("routine-card") and hasAnyDescendant(hasText(title))
             val completeButton = compose.onNode(hasText("구매 완료") and hasAnyAncestor(card))
@@ -102,6 +106,8 @@ class RoutineFlowTest {
             runBlocking {
                 val updated = requireNotNull(container.repository.getItem(original.id))
                 assertNotEquals(original.cycleId, updated.cycleId)
+                assertEquals(original.purchaseOption, updated.purchaseOption)
+                assertEquals(original.maxTotalWon, updated.maxTotalWon)
                 assertTrue(updated.nextPurchaseEpochDay in earliestNextDate..LocalDate.now().plusDays(7).toEpochDay())
                 val record = container.repository.history.first().single { it.itemId == original.id }
                 assertEquals(2, record.quantity)

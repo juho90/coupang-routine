@@ -59,9 +59,10 @@ class RoutineViewModel(
 
     fun saveItem(
         id: String?, title: String, productUrl: String, quantity: Int,
-        intervalDays: Int, nextPurchaseEpochDay: Long, onSaved: () -> Unit,
+        intervalDays: Int, nextPurchaseEpochDay: Long,
+        purchaseOption: String, maxTotalWon: Long, onSaved: () -> Unit,
     ) = mutate {
-        repository.saveItem(id, title, productUrl, quantity, intervalDays, nextPurchaseEpochDay)
+        repository.saveItem(id, title, productUrl, quantity, intervalDays, nextPurchaseEpochDay, purchaseOption, maxTotalWon)
         onSaved()
         reconcileAfterChange("상품을 저장했습니다")
     }
