@@ -96,7 +96,6 @@ class RoutineRepository(
                         nextPurchaseEpochDay = nextPurchaseEpochDay,
                         cycleId = UUID.randomUUID().toString(),
                         updatedAtEpochMillis = now,
-                        // Older callers omit both arguments; preserve previously registered conditions.
                         purchaseOption = nextOption,
                         maxTotalWon = if (clearMaxTotalWon) null else maxTotalWon ?: item.maxTotalWon,
                         productVariantsJson = nextVariants,
@@ -107,7 +106,6 @@ class RoutineRepository(
         }
     }
 
-    /** Selection is resolved from saved choices, never from a caller-supplied label or URL alone. */
     suspend fun selectVariant(itemId: String, canonicalUrl: String) = database.withTransaction {
         val item = requireNotNull(routineDao.getItem(itemId)) { "등록된 상품을 찾을 수 없어요." }
         require(!item.archived) { "보관한 상품의 옵션은 바꿀 수 없어요." }
@@ -137,7 +135,7 @@ class RoutineRepository(
         firstTitle: String, firstUrl: String, firstOption: String?,
         secondTitle: String, secondUrl: String, secondOption: String?,
     ): Boolean {
-        fun address(raw: String) = runCatching { CoupangCartProductLink.parse(raw).canonicalUrl }.getOrDefault(raw)
+        fun address(raw: String) = CoupangCartProductLink.parse(raw).canonicalUrl
         return firstTitle == secondTitle && firstOption == secondOption && address(firstUrl) == address(secondUrl)
     }
 

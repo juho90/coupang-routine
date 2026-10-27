@@ -27,7 +27,6 @@ import dev.local.rebuy.domain.ProductVariantCodec
 import dev.local.rebuy.importproduct.ProductLinkImportController
 import dev.local.rebuy.importproduct.ProductLinkImportState
 
-/** Opening this dialog never opens Coupang or saves a card. */
 @Composable
 internal fun ProductUrlImportDialog(
     rawInitialUrl: String,
@@ -111,7 +110,7 @@ internal fun ProductUrlImportDialog(
                 started = false
                 sequence += 1
                 resolvingWasPending = true
-                resolving = CartShareResolution(sequence, normalized, "", "", true)
+                resolving = CartShareResolution(sequence, normalized, "", "")
             }
         }
     }

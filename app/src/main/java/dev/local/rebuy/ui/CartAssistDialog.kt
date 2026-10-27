@@ -120,7 +120,7 @@ internal fun CartAssistDialog(
         }
     }
 
-    fun startResolved(canonicalUrl: String, requestTitle: String, requestOption: String, verifyOnly: Boolean) {
+    fun startResolved(canonicalUrl: String, requestTitle: String, requestOption: String) {
         if (CartAssistController.state.value is CartAssistState.Running || AutoBuyController.isActive()) {
             error = "다른 구매 도우미가 실행 중입니다. 실행을 마친 뒤 다시 시작해 주세요."
             return
@@ -130,13 +130,13 @@ internal fun CartAssistDialog(
             return
         }
         url = product.canonicalUrl
-        ownsAttempt = CartAssistController.start(context, CartAssistRequest(product.canonicalUrl, requestTitle, requestOption, verifyOnly = verifyOnly))
+        ownsAttempt = CartAssistController.start(context, CartAssistRequest(product.canonicalUrl, requestTitle, requestOption))
         serviceEnabled = CartAssistController.isEnabled(context)
         if (!ownsAttempt) error = (CartAssistController.state.value as? CartAssistState.Finished)?.message
             ?: "구매 도우미를 시작하지 못했습니다. 잠시 뒤 다시 시도해 주세요."
     }
 
-    fun beginAttempt(verifyOnly: Boolean) {
+    fun beginAttempt() {
         if (busy) return
         error = when {
             url.isBlank() -> "쿠팡 상품 URL을 입력해 주세요."
@@ -155,11 +155,11 @@ internal fun CartAssistDialog(
         val requestOption = option.trim()
         val product = runCatching { CoupangCartProductLink.parse(requestUrl) }.getOrNull()
         if (product != null) {
-            startResolved(product.canonicalUrl, requestTitle, requestOption, verifyOnly)
+            startResolved(product.canonicalUrl, requestTitle, requestOption)
         } else {
             resolutionSequence += 1
             resolutionWasPending = true
-            resolution = CartShareResolution(resolutionSequence, requestUrl, requestTitle, requestOption, verifyOnly)
+            resolution = CartShareResolution(resolutionSequence, requestUrl, requestTitle, requestOption)
         }
     }
 
@@ -258,7 +258,7 @@ internal fun CartAssistDialog(
                             if (resolution?.id == request.id) {
                                 resolution = null
                                 resolutionWasPending = false
-                                startResolved(canonicalUrl, request.title, request.option, request.verifyOnly)
+                                startResolved(canonicalUrl, request.title, request.option)
                             }
                         },
                         onFailure = { message ->
@@ -277,11 +277,8 @@ internal fun CartAssistDialog(
                         Text(result.message, style = MaterialTheme.typography.bodySmall)
                     }
                     is CartAssistState.Finished -> {
-                        Text(when {
-                            result.verifiedOnly -> "상품 정보 확인 완료 · 추가하지 않았습니다"
-                            result.success -> "담기 완료"
-                            else -> "담기를 마치지 못했습니다"
-                        }, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
+                        Text(if (result.success) "담기 완료" else "담기를 마치지 못했습니다",
+                            fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
                         Text(result.message, color = if (result.success) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                     }
                 }
@@ -310,11 +307,11 @@ internal fun CartAssistDialog(
             } else {
                 Button(
                     enabled = quantity == 1 && serviceEnabled,
-                    onClick = { beginAttempt(verifyOnly = false) },
+                    onClick = ::beginAttempt,
                     modifier = Modifier.fillMaxWidth().testTag("cart-add-one"),
                 ) {
                     val completed = (assistState as? CartAssistState.Finished)
-                        ?.takeIf { ownsAttempt && it.success && !it.verifiedOnly }
+                        ?.takeIf { ownsAttempt && it.success }
                     Text(if (completed != null) "한 번 더 담기" else "장바구니에 담기")
                 }
             }
@@ -323,7 +320,7 @@ internal fun CartAssistDialog(
     )
 }
 
-internal data class CartShareResolution(val id: Long, val url: String, val title: String, val option: String, val verifyOnly: Boolean)
+internal data class CartShareResolution(val id: Long, val url: String, val title: String, val option: String)
 
 @Composable
 internal fun CartShareResolutionPanel(request: CartShareResolution, onResolved: (String) -> Unit, onFailure: (String) -> Unit) {

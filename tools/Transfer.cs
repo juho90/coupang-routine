@@ -127,14 +127,10 @@ internal static class AndroidTransfer
 {
     private const string Provider = "content://dev.local.rebuy.pc-images";
 
-    public static async Task SendAsync(byte[] png, string? adb, string serial, IProgress<string>? progress, CancellationToken cancellation)
+    public static async Task SendAsync(byte[] png, string adb, string serial, IProgress<string>? progress, CancellationToken cancellation)
     {
-        if (string.IsNullOrWhiteSpace(adb) || !File.Exists(adb) || !string.Equals(Path.GetFileName(adb), "adb.exe", StringComparison.OrdinalIgnoreCase))
-            throw new UserMessageException("ADB를 찾지 못했습니다. --adb 옵션으로 adb.exe를 지정해 주세요.");
         progress?.Report("BlueStacks 연결과 다시담기 앱 설치를 확인하고 있습니다.");
         await AndroidConnection.ConnectAsync(adb, serial, cancellation);
-        // BlueStacks can report a phone hardware name (for example qcom), so verify the
-        // chosen connected device and our own installed package instead of guessing by model.
         var installed = await AdbProcess.RunAsync(adb, ["-s", serial, "shell", "pm", "path", "dev.local.rebuy"], null, cancellation, TimeSpan.FromSeconds(5));
         if (installed.ExitCode != 0 || !Regex.IsMatch(installed.Output, @"(?m)^package:"))
             throw new UserMessageException("선택한 Android 장치에 다시담기가 설치되어 있지 않습니다. BlueStacks 인스턴스와 앱 설치를 확인해 주세요.");

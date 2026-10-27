@@ -43,7 +43,6 @@ import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.local.rebuy.NotificationCompletionRequest
-import dev.local.rebuy.autobuy.AutoBuyStore
 import dev.local.rebuy.autobuy.AutoBuyController
 import dev.local.rebuy.cart.CartAssistPolicy
 import dev.local.rebuy.cart.CartAssistController
@@ -70,7 +69,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.CancellationException
 
 private val dateFormat = DateTimeFormatter.ofPattern("M월 d일 (E)", Locale.KOREA)
 private val historyFormat = DateTimeFormatter.ofPattern("yyyy.MM.dd HH:mm", Locale.KOREA)
@@ -584,7 +582,6 @@ private fun ItemEditor(
     onImportOpenChanged: (Boolean) -> Unit = {},
     onSave: (String, String, Int, Int, Long, String, Long?, String?) -> Unit,
 ) {
-    val context = LocalContext.current
     val key = item?.id ?: "new"
     var title by rememberSaveable(key) { mutableStateOf(item?.title.orEmpty()) }
     var url by rememberSaveable(key) { mutableStateOf(item?.productUrl.orEmpty()) }
@@ -598,59 +595,17 @@ private fun ItemEditor(
     var date by rememberSaveable(key) { mutableLongStateOf(item?.nextPurchaseEpochDay ?: today) }
     var showDatePicker by rememberSaveable(key) { mutableStateOf(false) }
     var error by rememberSaveable(key) { mutableStateOf<String?>(null) }
-    var edited by rememberSaveable(key) { mutableStateOf(false) }
-    val needsLegacyConditions = item != null && item.purchaseOption == null
-    var legacyChecked by rememberSaveable(key) { mutableStateOf(!needsLegacyConditions) }
-    var legacyLoading by remember(key) { mutableStateOf(!legacyChecked) }
-    var legacyNotice by rememberSaveable(key) { mutableStateOf<String?>(null) }
-    val inputEnabled = !busy && !legacyLoading
-    fun changed() { edited = true; error = null }
+    val inputEnabled = !busy
+    fun changed() { error = null }
     fun identityChanged() { variantsJson = "[]"; changed() }
 
     LaunchedEffect(incomingImage?.id) { if (incomingImage != null) showManualDetails = true }
 
-    LaunchedEffect(key) {
-        val original = item
-        if (legacyChecked || !needsLegacyConditions || original == null) {
-            legacyLoading = false
-            return@LaunchedEffect
-        }
-        var checked = false
-        try {
-            val previous = AutoBuyStore(context.applicationContext).getProfile(original.id)
-            val matches = previous != null && previous.quantitySnapshot == original.quantity &&
-                runCatching { CoupangUrl.normalize(original.productUrl) == previous.productUrlSnapshot }.getOrDefault(false)
-            // Restored or edited fields are authoritative. A late local read never replaces them.
-            if (!edited && matches && previous != null && url == original.productUrl) {
-                if (original.purchaseOption == null && option.isBlank()) option = previous.expectedOption
-                if (original.maxTotalWon == null && limit.isBlank()) limit = previous.maxTotalWon.toString()
-                if (original.purchaseOption == null && original.maxTotalWon == null && title == original.title && previous.expectedTitle.trim().length in 1..100) {
-                    title = previous.expectedTitle.trim()
-                }
-                legacyNotice = "이전 구매 조건을 불러왔습니다. 구매 옵션과 금액 한도를 확인한 뒤 저장해 주세요."
-            } else if (!matches) {
-                legacyNotice = "이전 구매 조건을 사용할 수 없습니다. 구매 옵션과 금액 한도를 직접 입력해 주세요."
-            }
-            checked = true
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (_: Exception) {
-            legacyNotice = "이전 구매 조건을 읽지 못했습니다. 구매 옵션과 금액 한도를 직접 입력해 주세요."
-            checked = true
-        } finally {
-            if (checked) { legacyChecked = true; legacyLoading = false }
-        }
-    }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(if (item == null) "다시 살 상품 등록" else "상품 수정") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                if (legacyLoading) {
-                    LinearProgressIndicator(Modifier.fillMaxWidth())
-                    Text("이전 구매 조건을 확인하고 있어요.", style = MaterialTheme.typography.bodySmall)
-                }
-                legacyNotice?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
                 Text("선택한 옵션의 쿠팡 링크를 붙여 넣어 주세요.", style = MaterialTheme.typography.bodyMedium)
                 OutlinedTextField(
                     url, { url = it; title = ""; option = ""; identityChanged() },

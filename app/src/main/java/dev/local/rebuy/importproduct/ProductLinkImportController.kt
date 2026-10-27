@@ -109,7 +109,6 @@ object ProductLinkImportController {
             val session = current ?: return
             if (root == null) return
             val now = SystemClock.elapsedRealtime()
-            // No text or child nodes from another package are inspected.
             if (root.packageName?.toString() != CartAssistController.COUPANG_PACKAGE) {
                 if (session.coupangSeen) finish(null, "쿠팡을 벗어나 상품 정보 읽기를 중단했습니다.")
                 return
@@ -149,7 +148,6 @@ object ProductLinkImportController {
             }
             if (session.scrollCount < 4 && now - session.lastScrollAt >= 1_200) {
                 session.lastScrollAt = now
-                // The only native action allowed by this reader is bounded detail scrolling.
                 val accepted = CartAssistPolicy.requestDetailScroll(nodes,
                     isScrollable = { snapshot.entries[it].node.isScrollable },
                     scrollForward = { snapshot.entries[it].node.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD) },
@@ -187,7 +185,6 @@ object ProductLinkImportController {
     }
 }
 
-/** Text suggestions stay inside the observed product detail; no catalog or option IDs are invented. */
 internal object ProductLinkImportPolicy {
     private val detailNotice = Regex(
         "^(?:한\\s*달간\\s*[0-9,]+(?:만|천)?\\s*명.*구매.*|" +

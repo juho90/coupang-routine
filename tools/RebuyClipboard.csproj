@@ -8,7 +8,7 @@
     <Nullable>enable</Nullable>
     <AssemblyName>RebuyClipboard</AssemblyName>
     <Product>다시담기 이미지 전송 CLI</Product>
-    <Version>1.2.0</Version>
+    <Version>1.2.1</Version>
     <PublishProfile Condition="'$(PublishProfile)' == '' and '$(_IsPublishing)' == 'true'">WindowsX64</PublishProfile>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <RestoreConfigFile>$(MSBuildProjectDirectory)/NuGet.Config</RestoreConfigFile>

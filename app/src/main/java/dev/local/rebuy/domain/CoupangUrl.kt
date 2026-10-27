@@ -6,7 +6,6 @@ import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
 import java.util.Locale
 
-/** Validates an external URL without loading it, following redirects, or calling an API. */
 object CoupangUrl {
     fun normalize(raw: String): String {
         val input = raw.trim()

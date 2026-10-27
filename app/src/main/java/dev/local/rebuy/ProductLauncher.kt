@@ -5,10 +5,8 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import dev.local.rebuy.domain.CoupangCartProductLink
-import dev.local.rebuy.domain.CoupangProductLink
 import dev.local.rebuy.domain.CoupangUrl
 
-/** The public product deep link observed in Coupang 9.4.5; HTTPS remains the fallback. */
 object ProductLauncher {
     /** Cart automation can observe only Coupang: never report a browser launch as success. */
     fun openInCoupang(context: Context, rawUrl: String, newTask: Boolean = false): Boolean {
@@ -18,7 +16,7 @@ object ProductLauncher {
 
     fun open(context: Context, rawUrl: String, newTask: Boolean = false): Boolean {
         val url = runCatching { CoupangUrl.normalize(rawUrl) }.getOrNull() ?: return false
-        val product = runCatching { CoupangProductLink.parse(url) }.getOrNull()
+        val product = runCatching { CoupangCartProductLink.parseExactOption(url) }.getOrNull()
         if (product != null && launch(context, product.nativeUri, "com.coupang.mobile", newTask)) return true
         return launch(context, url, null, newTask)
     }

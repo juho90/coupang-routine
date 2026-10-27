@@ -4,7 +4,6 @@ import java.text.Normalizer
 import org.json.JSONArray
 import org.json.JSONObject
 
-/** Each observed option keeps its own identity and address together. */
 data class ProductVariant(val title: String, val option: String, val productUrl: String)
 
 object ProductVariantCodec {

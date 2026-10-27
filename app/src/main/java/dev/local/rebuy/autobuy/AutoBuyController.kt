@@ -11,7 +11,7 @@ import dev.local.rebuy.cart.CartAssistController
 import dev.local.rebuy.cart.CartAssistPolicy
 import dev.local.rebuy.cart.CartAssistService
 import dev.local.rebuy.data.RoutineItem
-import dev.local.rebuy.domain.CoupangProductLinks
+import dev.local.rebuy.domain.CoupangCartProductLink
 import dev.local.rebuy.importproduct.ProductLinkImportController
 import kotlinx.coroutines.CancellableContinuation
 import kotlinx.coroutines.CancellationException
@@ -131,11 +131,9 @@ object AutoBuyController {
             return@withContext AutoBuyOutcome.Blocked("저장된 상품명·옵션·수량·한도를 다시 확인해 주세요.")
         }
         val link = try {
-            CoupangProductLinks.resolve(profile.productUrlSnapshot)
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (_: Exception) {
-            return@withContext AutoBuyOutcome.Blocked("공유 링크에서 상품 주소를 확인하지 못했습니다. itemId와 vendorItemId가 포함된 전체 상품 주소로 다시 시도해 주세요.")
+            CoupangCartProductLink.parseExactOption(profile.productUrlSnapshot)
+        } catch (_: IllegalArgumentException) {
+            return@withContext AutoBuyOutcome.Blocked("상품 수정에서 선택한 옵션의 링크를 다시 불러와 저장한 뒤 시험해 주세요.")
         }
         suspendCancellableCoroutine<AutoBuyOutcome> { continuation ->
             val session = Session(context.applicationContext, item, profile, attemptId, continuation)

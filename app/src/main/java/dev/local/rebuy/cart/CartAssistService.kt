@@ -7,7 +7,6 @@ import android.view.accessibility.AccessibilityNodeInfo
 import dev.local.rebuy.autobuy.AutoBuyController
 import dev.local.rebuy.importproduct.ProductLinkImportController
 
-/** Explicit cart addition or checkout preview. Payment and authentication actions are unavailable. */
 class CartAssistService : AccessibilityService() {
     private var inspecting = false
 

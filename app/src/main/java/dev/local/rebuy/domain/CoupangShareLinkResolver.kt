@@ -21,11 +21,7 @@ import java.io.ByteArrayInputStream
 import java.io.Closeable
 import java.net.URI
 
-/**
- * Observes ordinary navigation in a UI-owned, visible WebView. It never opens an app, clicks a
- * page, injects script/cookies, reads HTML, or continues through a certificate/authentication error.
- * The owner must close this handle when dismissed/backgrounded, then destroy its WebView.
- */
+/** Resolves navigation in a visible WebView. The owner must close the handle before destroying it. */
 object CoupangShareLinkResolver {
     @SuppressLint("SetJavaScriptEnabled", "ClickableViewAccessibility")
     fun start(
@@ -167,7 +163,6 @@ object CoupangShareLinkResolver {
         }
     }
 
-    /** Pure policy keeps bounds and observed-ID validation testable without making network calls. */
     internal class NavigationPolicy {
         private val visited = mutableSetOf<String>()
         private var current: String? = null

@@ -33,7 +33,6 @@ internal object CartNodeTraversal {
         var truncated = false
         while (pending.isNotEmpty()) {
             val next = pending.removeFirst()
-            // Do not read text, identifiers, or descendants outside the selected package.
             if (!accepts(next.node)) continue
             val id = resourceId(next.node)
             val children = childCount(next.node).coerceAtLeast(0)

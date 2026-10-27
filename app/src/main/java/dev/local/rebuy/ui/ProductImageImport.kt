@@ -61,7 +61,6 @@ internal data class ProductImageDraft(
     val productUrl: String?,
 )
 
-/** The system photo picker grants access to one image; no library or storage permission is used. */
 @Composable
 internal fun ProductImageImport(
     enabled: Boolean,

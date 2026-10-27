@@ -14,7 +14,6 @@ interface PurchaseDao {
     @Query("SELECT * FROM purchase_records WHERE itemId = :itemId AND cycleId = :cycleId LIMIT 1")
     suspend fun getForCycle(itemId: String, cycleId: String): PurchaseRecord?
 
-    /** The unique index is a final database-level guard, in addition to the transaction. */
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertOnce(record: PurchaseRecord): Long
 }

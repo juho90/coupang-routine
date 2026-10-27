@@ -136,7 +136,7 @@ internal fun CartBatchDialog(items: List<RoutineItem>, onPreparingChanged: (Bool
                         val activeIndex = resolvingIndex
                         key(activeSequence, activeIndex) {
                             CartShareResolutionPanel(
-                                CartShareResolution(activeSequence * 100 + activeIndex, target.productUrl, target.title, target.option, true),
+                                CartShareResolution(activeSequence * 100 + activeIndex, target.productUrl, target.title, target.option),
                                 onResolved = { canonical ->
                                     if (pending != null && sequence == activeSequence && resolvingIndex == activeIndex) {
                                         resolved = resolved + target.copy(productUrl = canonical)

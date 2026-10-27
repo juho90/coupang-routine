@@ -23,7 +23,6 @@ import kotlinx.coroutines.withTimeout
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
-/** Reads only a user-selected content URI. Images and raw OCR text are never persisted. */
 object ProductImageReader {
     private const val MAX_BYTES = 24 * 1024 * 1024
     private const val MAX_SIDE = 3_072

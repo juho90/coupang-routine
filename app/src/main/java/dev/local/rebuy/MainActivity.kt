@@ -107,7 +107,6 @@ class MainActivity : ComponentActivity() {
         return if (itemId != null && cycleId != null) NotificationCompletionRequest(itemId, cycleId) else null
     }
 
-    /** Opening Coupang is always a user action. No credentials or payment flows enter this app. */
     private fun openProduct(rawUrl: String): Boolean = ProductLauncher.open(this, rawUrl)
 
     private companion object {

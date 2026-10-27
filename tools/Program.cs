@@ -83,7 +83,6 @@ internal static class Program
         check는 이미지 확인만 합니다. send는 Android의 이미지 검토 화면을 엽니다.
         클립보드는 send --clipboard를 실행할 때만 읽습니다. 상품 저장과 구매는 하지 않습니다.
         기본 기기: 127.0.0.1:5555. 인자 없이 실행하면 이 도움말을 표시합니다.
-        이전 --image <파일> [--send] 형식도 지원합니다.
         종료 코드: 0 성공, 2 입력·전송 오류, 3 중단·전체 시간 초과, 4 예상하지 못한 오류
         """);
 
@@ -127,9 +126,7 @@ internal sealed record CliOptions(CliCommand Command, string? ImageFile = null, 
             return new(sampleCommand, Adb: sampleAdb, Device: sampleDevice);
         }
 
-
-        var legacy = args[0].StartsWith("--", StringComparison.Ordinal);
-        var command = legacy ? CliCommand.Check : args[0] switch
+        var command = args[0] switch
         {
             "check" => CliCommand.Check,
             "send" => CliCommand.Send,
@@ -140,7 +137,7 @@ internal sealed record CliOptions(CliCommand Command, string? ImageFile = null, 
         var device = "127.0.0.1:5555";
         bool clipboard = false, help = false;
         var seen = new HashSet<string>(StringComparer.Ordinal);
-        for (var index = legacy ? 0 : 1; index < args.Length; index++)
+        for (var index = 1; index < args.Length; index++)
         {
             var option = args[index];
             if (!seen.Add(option)) throw new UserMessageException($"중복된 옵션입니다: {option}");
@@ -156,7 +153,6 @@ internal sealed record CliOptions(CliCommand Command, string? ImageFile = null, 
                 case "--adb": adb = Value(); break;
                 case "--device": device = Value(); break;
                 case "--clipboard": clipboard = true; break;
-                case "--send" when legacy: command = CliCommand.Send; break;
                 case "--help": case "-h": help = true; break;
                 default: throw new UserMessageException($"지원하지 않는 옵션입니다: {option}. --help로 사용법을 확인해 주세요.");
             }

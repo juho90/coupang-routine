@@ -2,7 +2,6 @@ package dev.local.rebuy.cart
 
 import java.text.Normalizer
 
-/** Presence flags only; no native text or identifiers leave the inspection boundary. */
 data class CartDetailStructure(
     val bottomContainer: Boolean = false,
     val buttonContainer: Boolean = false,

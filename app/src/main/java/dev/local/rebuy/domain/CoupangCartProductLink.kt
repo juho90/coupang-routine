@@ -27,6 +27,12 @@ data class CoupangCartProductLink private constructor(
             return create(productId, query(uri))
         }
 
+        fun parseExactOption(raw: String): CoupangCartProductLink = parse(raw).also {
+            require(it.itemId != null && it.vendorItemId != null) {
+                "상품 수정에서 선택한 옵션의 링크를 불러와 저장해 주세요."
+            }
+        }
+
         /** Only a product navigation actually emitted by the share page is accepted. Never launches it. */
         internal fun fromObservedNative(raw: String): CoupangCartProductLink {
             require(raw.length in 1..4096)

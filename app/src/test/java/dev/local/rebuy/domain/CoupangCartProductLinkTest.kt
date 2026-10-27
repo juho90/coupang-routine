@@ -6,6 +6,8 @@ import org.junit.Assert.assertThrows
 import org.junit.Test
 
 class CoupangCartProductLinkTest {
+    private val exact = "https://www.coupang.com/vp/products/7157272883?itemId=21389601649&vendorItemId=91294601197"
+
     @Test fun observedMlpRouterUsesOnlyItsActualProductReturnUrl() {
         val nested = "coupang://product?pId=9750360880&itemId=29195429057&vendorItemId=123"
         val encoded = java.net.URLEncoder.encode(nested, "UTF-8")
@@ -77,4 +79,43 @@ class CoupangCartProductLinkTest {
             assertThrows(raw, IllegalArgumentException::class.java) { CoupangCartProductLink.fromObservedNative(raw) }
         }
     }
+    @Test
+    fun preservesExactOptionAndUsesCaseSensitiveNativeProductParameter() {
+        val result = CoupangCartProductLink.parseExactOption("$exact&sourceType=cmgoms#details")
+        assertEquals(exact, result.canonicalUrl)
+        assertEquals("7157272883", result.productId)
+        assertEquals("21389601649", result.itemId)
+        assertEquals("91294601197", result.vendorItemId)
+        assertEquals(
+            "coupang://product?pId=7157272883&itemId=21389601649&vendorItemId=91294601197",
+            result.nativeUri,
+        )
+    }
+
+    @Test
+    fun acceptsReorderedIdsAndNormalizesHost() {
+        assertEquals(exact, CoupangCartProductLink.parseExactOption(
+            " HTTPS://COUPANG.COM/vp/products/7157272883/?vendorItemId=91294601197&itemId=21389601649 ",
+        ).canonicalUrl)
+    }
+
+    @Test
+    fun rejectsMissingAmbiguousOrNonNumericOptions() {
+        listOf(
+            "https://www.coupang.com/vp/products/1",
+            "https://www.coupang.com/vp/products/1?itemId=2",
+            "$exact&itemId=21389601649",
+            "$exact&vendorItemId=1",
+            "$exact&%69temId=1",
+            "https://www.coupang.com/vp/products/1?itemId=2%26buy%3D1&vendorItemId=3",
+            "https://www.coupang.com/vp/products/1?itemId=+2&vendorItemId=3",
+            "https://www.coupang.com/vp/products/1?itemId=２&vendorItemId=3",
+            "https://www.coupang.com/vp/products/1/other?itemId=2&vendorItemId=3",
+            "https://fake.coupang.com/vp/products/1?itemId=2&vendorItemId=3",
+            "http://www.coupang.com/vp/products/1?itemId=2&vendorItemId=3",
+        ).forEach { raw ->
+            assertThrows("Accepted $raw", IllegalArgumentException::class.java) { CoupangCartProductLink.parseExactOption(raw) }
+        }
+    }
+
 }

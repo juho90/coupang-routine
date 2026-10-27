@@ -67,6 +67,7 @@ if($results[0].Stdout -notmatch 'RebuyClipboard' -or $results[1].Stdout -notmatc
 if($results[2].Stdout -notmatch [regex]::Escape($expectedVersion)) { throw ('Expected version '+$expectedVersion+' on stdout.') }
 $results += Invoke-Cli 'unknown-command' @('unknown-command') 2
 $results += Invoke-Cli 'missing-image-value' @('check','--image') 2
+$results += Invoke-Cli 'legacy-arguments' @('--image',$image,'--send') 2
 $results += Invoke-Cli 'check-valid-image' @('check','--image',$image) 0
 $results += Invoke-Cli 'check-invalid-image' @('check','--image',$invalid) 2
 $results += Invoke-Cli 'sample-show' @('sample','show') 0

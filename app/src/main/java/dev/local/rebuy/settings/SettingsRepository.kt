@@ -20,7 +20,6 @@ data class ReminderSettings(
     val minute: Int = 0,
 )
 
-/** One application-scoped Preferences DataStore; no account or server is involved. */
 class SettingsRepository(context: Context) {
     private val store = context.applicationContext.reminderSettingsStore
 

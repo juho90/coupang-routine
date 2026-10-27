@@ -175,7 +175,6 @@ object CartAssistController {
             "담기 전 점검 중입니다. 상품명·옵션·버튼만 확인하며 장바구니에 추가하지 않습니다."
             else "쿠팡에서 상품명·옵션과 장바구니 담기 버튼을 확인하고 있습니다.")
         return try {
-            // A cart session requires a resolved product address and Coupang's native app.
             if (!ProductLauncher.openInCoupang(context, request.productUrl, newTask = true)) {
                 finish("쿠팡 상품 링크를 열지 못했습니다. 상품 주소와 쿠팡 앱 설치를 확인해 주세요.", false)
                 return false
@@ -299,7 +298,6 @@ object CartAssistController {
         return false
     }
 
-    /** Restore a summary only. No session, timer, link opening, or action is ever restored. */
     fun restoreDiagnostics(context: Context) {
         if (session != null) return
         appContext = context.applicationContext

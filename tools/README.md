@@ -42,7 +42,7 @@ dotnet publish .\tools
 $LASTEXITCODE
 ```
 
-인자 없이 실행하면 도움말을 표시합니다. PowerShell이나 명령 프롬프트에서 사용하세요. 이전 `--image <파일> [--send]` 형식도 지원하며 `--send`가 없으면 확인만 합니다. 경로에 공백이 있으면 따옴표로 감쌉니다. Ctrl+C로 중단할 수 있고 전체 제한 시간은 45초입니다.
+인자 없이 실행하면 도움말을 표시합니다. PowerShell이나 명령 프롬프트에서 사용하세요. 경로에 공백이 있으면 따옴표로 감쌉니다. Ctrl+C로 중단할 수 있고 전체 제한 시간은 45초입니다.
 
 `--adb`를 생략하면 EXE 옆, PATH, `C:\platform-tools\adb.exe`, 사용자 Android SDK 등의 위치를 찾습니다. 기본 기기는 `127.0.0.1:5555`이며 `--device`로 바꿀 수 있습니다. BlueStacks와 ADB 연결을 켜고 PC 이미지 받기를 지원하는 다시담기 앱을 설치해야 합니다.
 
@@ -88,4 +88,4 @@ PowerShell 7에서 아래 명령을 실행합니다. 실제 ADB 대신 별도 mo
 .\tools\tests\smoke.ps1 -Executable .\tools\dist\RebuyClipboard.exe
 ```
 
-도움말·버전·입력 오류·이미지 검사·합성 이미지 전송·장치 조회와 공통 샘플 표시·URL 열기까지 11개를 확인합니다. mock은 전달 인자, PNG 픽셀, 전송 ID 재사용과 READY 확인 후 앱 실행 순서도 검사합니다. 검사 로그는 `tools/tests/obj/run-*`에 생성합니다.
+도움말·버전·입력 오류·구 형식 거부·이미지 검사·합성 이미지 전송·장치 조회와 공통 샘플 표시·URL 열기까지 12개를 확인합니다. mock은 전달 인자, PNG 픽셀, 전송 ID 재사용과 READY 확인 후 앱 실행 순서도 검사합니다. 검사 로그는 `tools/tests/obj/run-*`에 생성합니다.
