@@ -253,11 +253,12 @@ class RoutineRepositoryTest {
     }
 
     @Test
-    fun legacyEditPreservesRegisteredPurchaseConditionsAndPausedState() = runTest {
+    fun explicitSavePreservesProvidedConditionsAndPausedState() = runTest {
         val id = save(purchaseOption = "600ml,2개", maxTotalWon = 75_000)
         repository.setEnabled(id, false)
         val before = requireNotNull(repository.getItem(id))
-        save(id = id, title = "수정한 상품명", quantity = 3)
+        save(id = id, title = "수정한 상품명", quantity = 3,
+            purchaseOption = before.purchaseOption, maxTotalWon = before.maxTotalWon)
         val after = requireNotNull(repository.getItem(id))
         assertEquals("수정한 상품명", after.title)
         assertEquals(3, after.quantity)
@@ -305,7 +306,7 @@ class RoutineRepositoryTest {
         due: String = "2026-10-21",
         purchaseOption: String? = null,
         maxTotalWon: Long? = null,
-    ) = repository.saveItem(id, title, url, quantity, interval, day(due), purchaseOption, maxTotalWon)
+    ) = repository.saveItem(id, title, url, quantity, interval, day(due), purchaseOption, maxTotalWon, productVariantsJson = null)
 
     private fun day(value: String): Long = LocalDate.parse(value).toEpochDay()
 }

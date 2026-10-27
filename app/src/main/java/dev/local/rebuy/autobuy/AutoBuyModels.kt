@@ -28,10 +28,8 @@ data class AutoBuyProfile(
         require(CoupangUrl.normalize(item.productUrl) == productUrlSnapshot) {
             "상품 주소가 변경됐습니다. 주문 조건을 다시 저장해 주세요."
         }
-        if (item.purchaseOption != null || item.maxTotalWon != null) {
-            require(expectedTitle == item.title && expectedOption == item.purchaseOption && maxTotalWon == item.maxTotalWon) {
-                "등록한 구매 조건이 변경됐습니다. 현재 상품의 조건으로 다시 시험해 주세요."
-            }
+        require(expectedTitle == item.title && expectedOption == item.purchaseOption && maxTotalWon == item.maxTotalWon) {
+            "등록한 구매 조건을 확인할 수 없습니다. 상품 수정에서 현재 조건을 저장한 뒤 다시 시험해 주세요."
         }
     }
 }

@@ -41,7 +41,8 @@ class RoutineRepositoryDeviceTest {
 
     @Test
     fun concurrentCompletionIsAtomicAndHistorySurvivesArchive() = runBlocking {
-        val id = repository.saveItem(null, "화장지", "https://www.coupang.com/vp/products/123", 2, 14, LocalDate.of(2026, 10, 21).toEpochDay())
+        val id = repository.saveItem(null, "화장지", "https://www.coupang.com/vp/products/123", 2, 14,
+            LocalDate.of(2026, 10, 21).toEpochDay(), purchaseOption = null, maxTotalWon = null, productVariantsJson = null)
         val cycle = requireNotNull(repository.getItem(id)).cycleId
         val results = List(12) { async(Dispatchers.Default) { repository.completePurchase(id, cycle) } }.awaitAll()
         assertEquals(1, results.count { it == CompletionResult.Completed })

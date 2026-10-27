@@ -166,7 +166,7 @@ class AutoBuyStoreTest {
     }
 
     @Test fun registeredConditionsRejectAnOldProfileBeforeCreatingAnyAttempt() = runBlocking {
-        val item = item().copy(purchaseOption = "600ml, 2개", maxTotalWon = 80_000)
+        val item = item()
         listOf(
             profile(item).copy(expectedTitle = "이전 상품명"),
             profile(item).copy(expectedOption = "600ml, 1개"),
@@ -179,6 +179,20 @@ class AutoBuyStoreTest {
         val current = store.saveProfile(profile(item))
         assertNotNull(store.claimAttempt(item, current, dryRun = true))
         assertFalse(AutoBuyPolicy.ACTUAL_PURCHASE_ENABLED)
+    }
+
+    @Test fun missingRoomConditionsCannotReuseAStoredProfile() = runBlocking {
+        val current = item()
+        val saved = store.saveProfile(profile(current))
+        listOf(
+            current.copy(purchaseOption = null, maxTotalWon = null),
+            current.copy(purchaseOption = null),
+            current.copy(maxTotalWon = null),
+        ).forEach { incomplete ->
+            expectInvalid { store.claimAttempt(incomplete, saved, dryRun = true) }
+        }
+        assertTrue(store.attempts.first().isEmpty())
+        assertNotNull(store.claimAttempt(current, saved, dryRun = true))
     }
 
     private suspend fun expectInvalid(block: suspend () -> Unit) {
@@ -194,7 +208,7 @@ class AutoBuyStoreTest {
         id = "routine-one", title = "테스트 상품",
         productUrl = "https://www.coupang.com/vp/products/7157272883?itemId=21389601649&vendorItemId=91294601197",
         quantity = 1, intervalDays = 30, nextPurchaseEpochDay = LocalDate.now().toEpochDay(),
-        cycleId = "cycle-one",
+        cycleId = "cycle-one", purchaseOption = "600ml, 2개", maxTotalWon = 80_000,
     )
 
     private fun profile(item: RoutineItem) = AutoBuyProfile(

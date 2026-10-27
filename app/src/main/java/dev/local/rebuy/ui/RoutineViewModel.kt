@@ -9,7 +9,6 @@ import dev.local.rebuy.domain.CompletionResult
 import dev.local.rebuy.domain.CoupangCartProductLink
 import dev.local.rebuy.domain.ProductVariant
 import dev.local.rebuy.domain.ProductVariantCodec
-import dev.local.rebuy.cart.CartAssistPolicy
 import dev.local.rebuy.reminders.ReminderScheduler
 import dev.local.rebuy.settings.ReminderSettings
 import dev.local.rebuy.settings.SettingsRepository
@@ -64,10 +63,10 @@ class RoutineViewModel(
     fun saveItem(
         id: String?, title: String, productUrl: String, quantity: Int,
         intervalDays: Int, nextPurchaseEpochDay: Long,
-        purchaseOption: String, maxTotalWon: Long?, productVariantsJson: String? = null, onSaved: () -> Unit,
+        purchaseOption: String, maxTotalWon: Long?, productVariantsJson: String?, onSaved: () -> Unit,
     ) = mutate {
         repository.saveItem(id, title, productUrl, quantity, intervalDays, nextPurchaseEpochDay, purchaseOption,
-            maxTotalWon, productVariantsJson, clearMaxTotalWon = maxTotalWon == null)
+            maxTotalWon, productVariantsJson)
         onSaved()
         reconcileAfterChange("상품을 저장했습니다")
     }
@@ -83,16 +82,13 @@ class RoutineViewModel(
         require(!current.archived) { "보관된 상품은 수정할 수 없어요." }
         val imported = ProductVariantCodec.validate(listOf(variant)).single()
         val importedLink = CoupangCartProductLink.parse(imported.productUrl)
-        val currentLink = runCatching { CoupangCartProductLink.parse(current.productUrl) }.getOrNull()
-        if (currentLink == null) {
-            require(CartAssistPolicy.normalize(current.title) == CartAssistPolicy.normalize(imported.title) &&
-                CartAssistPolicy.normalizeOption(current.purchaseOption.orEmpty()) == CartAssistPolicy.normalizeOption(imported.option)) {
-                "먼저 상품 수정에서 현재 URL의 정보를 다시 읽고 저장한 뒤 다른 옵션을 추가해 주세요."
-            }
-        } else require(currentLink.productId == importedLink.productId) { "같은 상품의 옵션 URL만 추가할 수 있습니다." }
-        val selected = currentLink?.let { link ->
-            current.purchaseOption?.let { ProductVariant(current.title, it, link.canonicalUrl) }
+        val currentLink = try {
+            CoupangCartProductLink.parse(current.productUrl)
+        } catch (invalid: IllegalArgumentException) {
+            throw IllegalArgumentException("상품 수정에서 현재 링크의 정보를 불러와 저장한 뒤 옵션을 추가해 주세요.", invalid)
         }
+        require(currentLink.productId == importedLink.productId) { "같은 상품의 옵션 링크만 추가할 수 있습니다." }
+        val selected = current.purchaseOption?.let { ProductVariant(current.title, it, currentLink.canonicalUrl) }
         val previous = (ProductVariantCodec.decode(current.productVariantsJson) + listOfNotNull(selected))
             .distinctBy { it.productUrl }
         val variants = previous.filterNot { it.productUrl == imported.productUrl } + imported

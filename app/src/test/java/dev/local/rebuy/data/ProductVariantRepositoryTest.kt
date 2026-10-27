@@ -66,9 +66,9 @@ class ProductVariantRepositoryTest {
         assertEquals(listOf(first, second), ProductVariantCodec.decode(item.productVariantsJson))
         repository.selectVariant(id, second.productUrl)
         assertNull(repository.getItem(id)?.maxTotalWon)
-        repository.saveItem(id, second.title, second.productUrl, 1, 30, 20_700, second.option, 45_000)
+        repository.saveItem(id, second.title, second.productUrl, 1, 30, 20_700, second.option, 45_000, choices)
         assertEquals(45_000L, repository.getItem(id)?.maxTotalWon)
-        repository.saveItem(id, second.title, second.productUrl, 1, 30, 20_700, second.option, clearMaxTotalWon = true)
+        repository.saveItem(id, second.title, second.productUrl, 1, 30, 20_700, second.option, null, choices)
         assertNull(repository.getItem(id)?.maxTotalWon)
         assertEquals(listOf(first, second), ProductVariantCodec.decode(repository.getItem(id)?.productVariantsJson))
     }
@@ -85,12 +85,29 @@ class ProductVariantRepositoryTest {
         assertTrue(repository.history.first().isEmpty())
     }
 
-    @Test fun identityEditsClearStaleChoicesWhileScheduleEditsPreserveThem() = runTest {
+    @Test fun fullSaveRetainsOnlyExplicitlySuppliedChoices() = runTest {
         val id = repository.saveItem(null, first.title, first.productUrl, 1, 30, 20_700, first.option, null, choices)
-        repository.saveItem(id, first.title, first.productUrl, 2, 7, 20_710, first.option)
+        repository.saveItem(id, first.title, first.productUrl, 2, 7, 20_710, first.option, null, choices)
         assertEquals(listOf(first, second), ProductVariantCodec.decode(repository.getItem(id)?.productVariantsJson))
-        repository.saveItem(id, "다르게 수정한 상품명", first.productUrl, 2, 7, 20_710, first.option)
+        repository.saveItem(id, "다르게 수정한 상품명", first.productUrl, 2, 7, 20_710, first.option, null, null)
         assertNull(repository.getItem(id)?.productVariantsJson)
+    }
+
+    @Test fun explicitNullsClearPriorConditionsAndChoicesWithoutReconstructingThem() = runTest {
+        val id = repository.saveItem(null, first.title, first.productUrl, 1, 30, 20_700, first.option, 45_000, choices)
+        repository.setEnabled(id, false)
+        val before = requireNotNull(repository.getItem(id))
+        repository.saveItem(id, before.title, before.productUrl, before.quantity, before.intervalDays,
+            before.nextPurchaseEpochDay, purchaseOption = null, maxTotalWon = null, productVariantsJson = null)
+        val after = requireNotNull(repository.getItem(id))
+        assertNull(after.purchaseOption)
+        assertNull(after.maxTotalWon)
+        assertNull(after.productVariantsJson)
+        assertFalse(after.enabled)
+        assertEquals(before.createdAtEpochMillis, after.createdAtEpochMillis)
+        assertEquals(before.nextPurchaseEpochDay, after.nextPurchaseEpochDay)
+        assertNotEquals(before.cycleId, after.cycleId)
+        assertTrue(repository.history.first().isEmpty())
     }
 
     @Test fun choicesRejectOtherProductsDuplicateAddressesAndMalformedJson() {

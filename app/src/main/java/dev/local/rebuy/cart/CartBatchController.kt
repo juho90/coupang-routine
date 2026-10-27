@@ -156,10 +156,10 @@ object CartBatchController {
                 val entry = entries.getJSONObject(index)
                 CartBatchEntry(
                     CartBatchTarget(entry.getString("itemId"), entry.getString("title"), entry.getString("url"), entry.getString("option"), entry.getInt("quantity")),
-                    CartBatchEntryStatus.valueOf(entry.getString("status")), entry.optString("message"),
+                    CartBatchEntryStatus.valueOf(entry.getString("status")), entry.getString("message"),
                 )
             },
-            running = json.getBoolean("running"), message = json.optString("message"), interrupted = json.optBoolean("interrupted"),
+            running = json.getBoolean("running"), message = json.getString("message"), interrupted = json.getBoolean("interrupted"),
         )
     }
 }

@@ -215,6 +215,7 @@ class ReminderSchedulerTest {
     private suspend fun save(id: String? = null, due: LocalDate = LocalDate.now().minusDays(1)): RoutineItem {
         val savedId = repository.saveItem(
             id, "생수", "https://www.coupang.com/vp/products/123?itemId=456", 2, 7, due.toEpochDay(),
+            purchaseOption = null, maxTotalWon = null, productVariantsJson = null,
         )
         return requireNotNull(repository.getItem(savedId))
     }

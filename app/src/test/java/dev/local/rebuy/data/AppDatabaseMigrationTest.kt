@@ -77,7 +77,7 @@ class AppDatabaseMigrationTest {
         assertEquals(listOf(expectedHistory), repository.history.first())
 
         repository.saveItem(active.id, active.title, active.productUrl, active.quantity, active.intervalDays,
-            active.nextPurchaseEpochDay, purchaseOption = "600ml,2개", maxTotalWon = 75_000)
+            active.nextPurchaseEpochDay, purchaseOption = "600ml,2개", maxTotalWon = 75_000, productVariantsJson = null)
         val updated = requireNotNull(repository.getItem(active.id))
         assertEquals("600ml,2개", updated.purchaseOption)
         assertEquals(75_000L, updated.maxTotalWon)

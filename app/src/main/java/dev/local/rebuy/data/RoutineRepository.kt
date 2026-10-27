@@ -37,12 +37,10 @@ class RoutineRepository(
         quantity: Int,
         intervalDays: Int,
         nextPurchaseEpochDay: Long,
-        purchaseOption: String? = null,
-        maxTotalWon: Long? = null,
-        productVariantsJson: String? = null,
-        clearMaxTotalWon: Boolean = false,
+        purchaseOption: String?,
+        maxTotalWon: Long?,
+        productVariantsJson: String?,
     ): String {
-        require(!clearMaxTotalWon || maxTotalWon == null) { "금액 한도 삭제와 새 한도 저장은 동시에 요청할 수 없습니다." }
         val cleanTitle = title.trim()
         require(cleanTitle.length in 1..100) { "상품명은 1~100자로 입력해 주세요." }
         require(quantity in 1..999) { "수량은 1~999개로 입력해 주세요." }
@@ -61,6 +59,7 @@ class RoutineRepository(
         if (maxTotalWon != null) require(maxTotalWon in 1..100_000_000) {
             "총 결제 한도는 1원~1억원으로 입력해 주세요."
         }
+        val cleanVariants = productVariantsJson?.let { checkedVariantSelection(it, cleanTitle, cleanUrl, cleanOption) }
         return database.withTransaction {
             val now = effectiveClock().millis()
             if (id == null) {
@@ -74,19 +73,13 @@ class RoutineRepository(
                     updatedAtEpochMillis = now,
                     purchaseOption = cleanOption,
                     maxTotalWon = maxTotalWon,
-                    productVariantsJson = productVariantsJson?.let { checkedVariantSelection(it, cleanTitle, cleanUrl, cleanOption) },
+                    productVariantsJson = cleanVariants,
                 )
                 routineDao.insert(item)
                 item.id
             } else {
                 val item = requireNotNull(routineDao.getItem(id)) { "등록된 상품을 찾을 수 없어요." }
                 require(!item.archived) { "삭제된 상품은 수정할 수 없어요." }
-                val nextOption = cleanOption ?: item.purchaseOption
-                val nextVariants = if (productVariantsJson != null) {
-                    checkedVariantSelection(productVariantsJson, cleanTitle, cleanUrl, nextOption)
-                } else item.productVariantsJson?.takeIf {
-                    sameSelection(item.title, item.productUrl, item.purchaseOption, cleanTitle, cleanUrl, nextOption)
-                }
                 routineDao.update(
                     item.copy(
                         title = cleanTitle,
@@ -96,9 +89,9 @@ class RoutineRepository(
                         nextPurchaseEpochDay = nextPurchaseEpochDay,
                         cycleId = UUID.randomUUID().toString(),
                         updatedAtEpochMillis = now,
-                        purchaseOption = nextOption,
-                        maxTotalWon = if (clearMaxTotalWon) null else maxTotalWon ?: item.maxTotalWon,
-                        productVariantsJson = nextVariants,
+                        purchaseOption = cleanOption,
+                        maxTotalWon = maxTotalWon,
+                        productVariantsJson = cleanVariants,
                     ),
                 )
                 id
