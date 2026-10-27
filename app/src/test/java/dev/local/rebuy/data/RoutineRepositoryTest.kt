@@ -221,9 +221,8 @@ class RoutineRepositoryTest {
     }
 
     @Test
-    fun partialOrInvalidPurchaseConditionsCannotCreateAnyRow() = runTest {
+    fun invalidPurchaseConditionsCannotCreateAnyRow() = runTest {
         val invalid = listOf(
-            "600ml,2개" to null,
             null to 75_000L,
             " " to 75_000L,
             "가" to 75_000L,

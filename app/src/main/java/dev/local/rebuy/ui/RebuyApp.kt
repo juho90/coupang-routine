@@ -51,6 +51,11 @@ import dev.local.rebuy.cart.CartBatchController
 import dev.local.rebuy.data.PurchaseRecord
 import dev.local.rebuy.data.RoutineItem
 import dev.local.rebuy.domain.CoupangUrl
+import dev.local.rebuy.domain.CoupangCartProductLink
+import dev.local.rebuy.domain.ProductVariant
+import dev.local.rebuy.domain.ProductVariantCodec
+import dev.local.rebuy.importproduct.ProductLinkImportController
+import dev.local.rebuy.importproduct.ProductLinkImportState
 import dev.local.rebuy.importproduct.IncomingProductImage
 import dev.local.rebuy.settings.ReminderSettings
 import java.time.Instant
@@ -94,7 +99,9 @@ fun RebuyApp(
         val repositoryBusy by viewModel.busy.collectAsStateWithLifecycle()
         val batchState by CartBatchController.state.collectAsStateWithLifecycle()
         var batchPreparing by remember { mutableStateOf(false) }
-        val busy = repositoryBusy || batchState.running || batchPreparing
+        val productImportState by ProductLinkImportController.state.collectAsStateWithLifecycle()
+        var productImportOpen by remember { mutableStateOf(false) }
+        val busy = repositoryBusy || batchState.running || batchPreparing || productImportOpen || productImportState is ProductLinkImportState.Running
         val completion by viewModel.completionPrompt.collectAsStateWithLifecycle()
         val snackbar = remember { SnackbarHostState() }
         val scope = rememberCoroutineScope()
@@ -176,6 +183,7 @@ fun RebuyApp(
         var showEditor by rememberSaveable { mutableStateOf(false) }
         var editorId by rememberSaveable { mutableStateOf<String?>(null) }
         var archiveId by rememberSaveable { mutableStateOf<String?>(null) }
+        var optionImportId by rememberSaveable { mutableStateOf<String?>(null) }
         var showCartAssist by rememberSaveable { mutableStateOf(false) }
         var showCartBatch by rememberSaveable { mutableStateOf(false) }
         var cartAssistUrl by rememberSaveable { mutableStateOf("") }
@@ -275,6 +283,8 @@ fun RebuyApp(
                         onCartAssist = { onCartAssist(it) },
                         onAutoBuy = { onAutoBuy(it) },
                         batchRunning = batchState.running, onCartBatch = onCartBatch,
+                        onSelectVariant = viewModel::selectVariant,
+                        onAddVariant = { if (!busy) optionImportId = it.id },
                     )
                     tab == 1 -> HistoryList(state.history, onOpen)
                     else -> SettingsScreen(state.settings, notificationsAllowed, busy, requestPermission, ::openNotificationSettings, viewModel::updateSettings, { onCartAssist(null) }, { onAutoBuy(null) })
@@ -287,10 +297,19 @@ fun RebuyApp(
             busy = busy, onDismiss = { if (!busy) showEditor = false },
             incomingImage = incomingImage,
             onIncomingImageConsumed = onIncomingImageConsumed,
-            onSave = { title, url, quantity, interval, date, option, limit ->
-                viewModel.saveItem(editorId, title, url, quantity, interval, date, option, limit) { showEditor = false }
+            onImportOpenChanged = { productImportOpen = it },
+            onSave = { title, url, quantity, interval, date, option, limit, variants ->
+                viewModel.saveItem(editorId, title, url, quantity, interval, date, option, limit, variants) { showEditor = false }
             },
         )
+        state.items.firstOrNull { it.id == optionImportId }?.let { item ->
+            ProductUrlImportDialog(
+                rawInitialUrl = item.productUrl,
+                onApply = { variant -> viewModel.addVariant(item, variant); optionImportId = null },
+                onDismiss = { optionImportId = null },
+                onOpenChanged = { productImportOpen = it },
+            )
+        }
         if (showCartAssist) CartAssistDialog(
             initialUrl = cartAssistUrl,
             initialTitle = cartAssistTitle,
@@ -349,6 +368,8 @@ private fun RoutineList(
     onCartAssist: (RoutineItem) -> Unit,
     onAutoBuy: (RoutineItem) -> Unit,
     batchRunning: Boolean, onCartBatch: () -> Unit,
+    onSelectVariant: (RoutineItem, ProductVariant) -> Unit = { _, _ -> },
+    onAddVariant: (RoutineItem) -> Unit = {},
 ) {
     val all = source.filterNot { it.archived }
     val dueCount = all.count { it.enabled && it.nextPurchaseEpochDay <= today }
@@ -396,7 +417,7 @@ private fun RoutineList(
             EmptyState(if (all.isEmpty()) "첫 상품을 등록해 보세요" else "이 목록은 아직 비어 있어요", "쿠팡의 상품 또는 공유 URL을 붙여 넣고\n수량과 구매 주기를 정해 주세요.", Modifier.padding(top = 44.dp))
         }
         items(visible, key = { it.id }) { item ->
-            RoutineCard(item, today, busy, onEdit, onToggle, onArchive, onOpen, onComplete, onCartAssist, onAutoBuy)
+            RoutineCard(item, today, busy, onEdit, onToggle, onArchive, onOpen, onComplete, onCartAssist, onAutoBuy, onSelectVariant, onAddVariant)
         }
         if (visible.isNotEmpty()) item {
             Text("쿠팡 열기로 직접 구매한 뒤 ‘구매 완료’를 눌러 주세요. 결제는 자동으로 진행되지 않습니다.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 6.dp))
@@ -411,9 +432,13 @@ private fun RoutineCard(
     onOpen: (String) -> Unit, onComplete: (RoutineItem) -> Unit,
     onCartAssist: (RoutineItem) -> Unit,
     onAutoBuy: (RoutineItem) -> Unit,
+    onSelectVariant: (RoutineItem, ProductVariant) -> Unit = { _, _ -> },
+    onAddVariant: (RoutineItem) -> Unit = {},
 ) {
     val isDue = item.enabled && item.nextPurchaseEpochDay <= today
     var menu by remember { mutableStateOf(false) }
+    var variantMenu by remember { mutableStateOf(false) }
+    val variants = remember(item.productVariantsJson) { ProductVariantCodec.decode(item.productVariantsJson) }
     Card(
         modifier = Modifier.testTag("routine-card"),
         colors = CardDefaults.cardColors(containerColor = if (isDue) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface),
@@ -437,6 +462,20 @@ private fun RoutineCard(
             }
             Text(item.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, maxLines = 3, overflow = TextOverflow.Ellipsis)
             item.purchaseOption?.let { Text("옵션  $it", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (variants.isNotEmpty()) Box {
+                    OutlinedButton(onClick = { variantMenu = true }, enabled = !busy, modifier = Modifier.testTag("product-variant-select")) { Text("옵션 선택 (${variants.size})") }
+                    DropdownMenu(expanded = variantMenu && !busy, onDismissRequest = { variantMenu = false }) {
+                        variants.forEach { variant ->
+                            DropdownMenuItem(
+                                text = { Text((if (variant.productUrl == item.productUrl) "✓ " else "") + variant.option) },
+                                onClick = { variantMenu = false; onSelectVariant(item, variant) },
+                            )
+                        }
+                    }
+                }
+                TextButton(onClick = { onAddVariant(item) }, enabled = !busy, modifier = Modifier.testTag("product-variant-add")) { Text("옵션 URL 추가") }
+            }
             item.maxTotalWon?.let { Text("금액 한도  ${NumberFormat.getIntegerInstance(Locale.KOREA).format(it)}원", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
             Text("${item.quantity}개  ·  ${item.intervalDays}일마다", color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text("다음 구매  ${formatDate(item.nextPurchaseEpochDay)}", style = MaterialTheme.typography.bodyMedium)
@@ -552,13 +591,16 @@ private fun ItemEditor(
     item: RoutineItem?, today: Long, busy: Boolean, onDismiss: () -> Unit,
     incomingImage: IncomingProductImage? = null,
     onIncomingImageConsumed: () -> Unit = {},
-    onSave: (String, String, Int, Int, Long, String, Long) -> Unit,
+    onImportOpenChanged: (Boolean) -> Unit = {},
+    onSave: (String, String, Int, Int, Long, String, Long?, String?) -> Unit,
 ) {
     val context = LocalContext.current
     val key = item?.id ?: "new"
     var title by rememberSaveable(key) { mutableStateOf(item?.title.orEmpty()) }
     var url by rememberSaveable(key) { mutableStateOf(item?.productUrl.orEmpty()) }
     var option by rememberSaveable(key) { mutableStateOf(item?.purchaseOption.orEmpty()) }
+    var variantsJson by rememberSaveable(key) { mutableStateOf(item?.productVariantsJson) }
+    var showUrlImport by rememberSaveable(key) { mutableStateOf(false) }
     var limit by rememberSaveable(key) { mutableStateOf(item?.maxTotalWon?.toString().orEmpty()) }
     var quantity by rememberSaveable(key) { mutableStateOf((item?.quantity ?: 1).toString()) }
     var interval by rememberSaveable(key) { mutableStateOf((item?.intervalDays ?: 30).toString()) }
@@ -566,12 +608,13 @@ private fun ItemEditor(
     var showDatePicker by rememberSaveable(key) { mutableStateOf(false) }
     var error by rememberSaveable(key) { mutableStateOf<String?>(null) }
     var edited by rememberSaveable(key) { mutableStateOf(false) }
-    val needsLegacyConditions = item != null && (item.purchaseOption == null || item.maxTotalWon == null)
+    val needsLegacyConditions = item != null && item.purchaseOption == null
     var legacyChecked by rememberSaveable(key) { mutableStateOf(!needsLegacyConditions) }
     var legacyLoading by remember(key) { mutableStateOf(!legacyChecked) }
     var legacyNotice by rememberSaveable(key) { mutableStateOf<String?>(null) }
     val inputEnabled = !busy && !legacyLoading
     fun changed() { edited = true; error = null }
+    fun identityChanged() { variantsJson = "[]"; changed() }
 
     LaunchedEffect(key) {
         val original = item
@@ -620,21 +663,24 @@ private fun ItemEditor(
                     incomingImage = incomingImage,
                     onIncomingImageConsumed = onIncomingImageConsumed,
                 ) { draft ->
+                    val previous = Triple(title, url, option)
                     if (draft.title.isNotBlank()) title = draft.title
                     draft.productUrl?.let { url = it }
                     if (draft.option.isNotBlank()) option = draft.option
                     draft.displayedPriceWon?.let { limit = it.toString() }
-                    changed()
+                    if (previous != Triple(title, url, option)) identityChanged() else changed()
                 }
                 Text("이미지에 상품 주소가 없으면 쿠팡 공유 링크를 별도로 붙여 넣어 주세요. 선택한 표시가격은 아래 금액 한도에 복사되므로 최종 구매 조건을 확인해 주세요.", style = MaterialTheme.typography.bodySmall)
-                OutlinedTextField(title, { title = it; changed() }, label = { Text("상품명") }, placeholder = { Text("예: 생수 2L 6개입") }, singleLine = true, enabled = inputEnabled, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(title, { title = it; identityChanged() }, label = { Text("상품명") }, placeholder = { Text("예: 생수 2L 6개입") }, singleLine = true, enabled = inputEnabled, modifier = Modifier.fillMaxWidth())
                 Text("쿠팡 화면에 표시되는 실제 상품명을 입력해 주세요. 결제 전 시험에서도 이 상품명으로 확인합니다.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                OutlinedTextField(url, { url = it; changed() }, label = { Text("쿠팡 상품 URL") }, placeholder = { Text("https://www.coupang.com/…") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri), minLines = 2, maxLines = 4, enabled = inputEnabled, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(url, { url = it; identityChanged() }, label = { Text("쿠팡 상품 URL") }, placeholder = { Text("https://www.coupang.com/…") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri), minLines = 2, maxLines = 4, enabled = inputEnabled, modifier = Modifier.fillMaxWidth())
                 Text("쿠팡의 상품 주소나 공유 링크를 붙여 넣어 주세요.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                OutlinedTextField(option, { option = it; changed() }, label = { Text("구매 옵션") }, placeholder = { Text("예: 600ml, 2개") }, minLines = 1, maxLines = 3, enabled = inputEnabled, modifier = Modifier.fillMaxWidth().testTag("purchase-option"))
+                OutlinedButton(onClick = { showUrlImport = true }, enabled = inputEnabled, modifier = Modifier.fillMaxWidth().testTag("product-url-import-open")) { Text("URL에서 상품 정보 읽기") }
+                if (ProductVariantCodec.decode(variantsJson).isNotEmpty()) Text("불러온 옵션을 카드에 함께 저장합니다. 상품명·URL·옵션을 직접 바꾸면 저장된 옵션 목록은 초기화됩니다.", style = MaterialTheme.typography.bodySmall)
+                OutlinedTextField(option, { option = it; identityChanged() }, label = { Text("구매 옵션") }, placeholder = { Text("예: 600ml, 2개") }, minLines = 1, maxLines = 3, enabled = inputEnabled, modifier = Modifier.fillMaxWidth().testTag("purchase-option"))
                 Text("쿠팡에 보이는 옵션을 그대로 입력해 주세요. 옵션의 ‘2개’ 같은 구성과 아래 구매 수량은 별개입니다.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                OutlinedTextField(limit, { limit = it.take(18); changed() }, label = { Text("금액 한도") }, suffix = { Text("원") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, enabled = inputEnabled, modifier = Modifier.fillMaxWidth().testTag("purchase-limit"))
-                Text("배송비를 포함한 최종 금액의 한도입니다. 이미지의 표시가격과 다를 수 있으니 확인해 주세요.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                OutlinedTextField(limit, { limit = it.take(18); changed() }, label = { Text("금액 한도 (선택)") }, suffix = { Text("원") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, enabled = inputEnabled, modifier = Modifier.fillMaxWidth().testTag("purchase-limit"))
+                Text("비워도 상품 카드를 저장할 수 있습니다. 결제 전 시험에는 배송비를 포함한 금액 한도가 필요합니다.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     OutlinedTextField(quantity, { quantity = it.take(4); changed() }, label = { Text("구매 수량") }, suffix = { Text("개") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, enabled = inputEnabled, modifier = Modifier.weight(1f))
                     OutlinedTextField(interval, { interval = it.take(4); changed() }, label = { Text("구매 주기") }, suffix = { Text("일") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, enabled = inputEnabled, modifier = Modifier.weight(1f))
@@ -651,18 +697,39 @@ private fun ItemEditor(
                 error = when {
                     title.trim().length !in 1..100 -> "상품명은 1~100자로 입력해 주세요"
                     option.trim().length > 120 || CartAssistPolicy.normalize(option).length < 2 -> "구매 옵션은 문자·숫자 2자 이상, 전체 120자 이내로 입력해 주세요"
-                    maximum == null || maximum !in 1L..100_000_000L -> "금액 한도는 1원~1억원으로 입력해 주세요"
+                    limit.isNotBlank() && (maximum == null || maximum !in 1L..100_000_000L) -> "금액 한도는 1원~1억원으로 입력해 주세요"
                     q == null || q !in 1..999 -> "수량은 1~999개로 입력해 주세요"
                     days == null || days !in 1..365 -> "주기는 1~365일로 입력해 주세요"
                     else -> null
                 }
-                if (error == null && q != null && days != null && maximum != null) {
-                    try { onSave(title.trim(), CoupangUrl.normalize(url), q, days, date, option.trim(), maximum) }
+                if (error == null && q != null && days != null) {
+                    try { onSave(title.trim(), CoupangUrl.normalize(url), q, days, date, option.trim(), maximum, variantsJson) }
                     catch (invalid: IllegalArgumentException) { error = invalid.message ?: "상품 주소를 확인해 주세요" }
                 }
             }) { Text("저장") }
         },
         dismissButton = { TextButton(onClick = onDismiss, enabled = !busy) { Text("취소") } },
+    )
+    if (showUrlImport) ProductUrlImportDialog(
+        rawInitialUrl = url,
+        onApply = { variant ->
+            val productId = CoupangCartProductLink.parse(variant.productUrl).productId
+            val current = runCatching {
+                ProductVariant(title.trim(), option.trim(), CoupangCartProductLink.parse(url).canonicalUrl)
+                    .also { ProductVariantCodec.encode(listOf(it)) }
+            }.getOrNull()
+            val previous = (ProductVariantCodec.decode(variantsJson) + listOfNotNull(current))
+                .filter { CoupangCartProductLink.parse(it.productUrl).productId == productId }
+                .distinctBy { it.productUrl }
+            variantsJson = ProductVariantCodec.encode(previous.filterNot { it.productUrl == variant.productUrl } + variant)
+            title = variant.title
+            url = variant.productUrl
+            option = variant.option
+            changed()
+            showUrlImport = false
+        },
+        onDismiss = { showUrlImport = false },
+        onOpenChanged = onImportOpenChanged,
     )
     if (showDatePicker) {
         // Material DatePicker uses UTC midnight, not a timestamp in the device's time zone.

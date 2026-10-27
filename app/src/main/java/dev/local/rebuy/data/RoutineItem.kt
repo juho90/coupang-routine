@@ -24,4 +24,5 @@ data class RoutineItem(
     val updatedAtEpochMillis: Long = createdAtEpochMillis,
     @ColumnInfo(defaultValue = "NULL") val purchaseOption: String? = null,
     @ColumnInfo(defaultValue = "NULL") val maxTotalWon: Long? = null,
+    @ColumnInfo(defaultValue = "NULL") val productVariantsJson: String? = null,
 )

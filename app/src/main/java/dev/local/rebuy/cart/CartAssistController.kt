@@ -15,6 +15,7 @@ import java.util.UUID
 import dev.local.rebuy.ProductLauncher
 import dev.local.rebuy.autobuy.AutoBuyController
 import dev.local.rebuy.domain.CoupangCartProductLink
+import dev.local.rebuy.importproduct.ProductLinkImportController
 
 data class CartAssistRequest(
     val productUrl: String,
@@ -158,7 +159,7 @@ object CartAssistController {
     /** Explicit UI action only. verifyOnly checks the same screen without requesting cart addition. */
     fun start(context: Context, request: CartAssistRequest): Boolean {
         check(Looper.myLooper() == Looper.getMainLooper())
-        if (session != null || AutoBuyController.isActive()) return false
+        if (session != null || AutoBuyController.isActive() || ProductLinkImportController.isActive()) return false
         appContext = context.applicationContext
         if (!validRequest(request)) return reject("상품 주소와 화면에 표시되는 상품명·옵션을 확인해 주세요.")
         if (!isEnabled(context)) {

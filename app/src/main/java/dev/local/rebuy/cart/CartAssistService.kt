@@ -5,6 +5,7 @@ import android.os.SystemClock
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import dev.local.rebuy.autobuy.AutoBuyController
+import dev.local.rebuy.importproduct.ProductLinkImportController
 
 /** Explicit cart addition or checkout preview. Payment and authentication actions are unavailable. */
 class CartAssistService : AccessibilityService() {
@@ -14,6 +15,7 @@ class CartAssistService : AccessibilityService() {
         super.onServiceConnected()
         CartAssistController.connected(this)
         AutoBuyController.connected(this)
+        ProductLinkImportController.connected(this)
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -23,15 +25,21 @@ class CartAssistService : AccessibilityService() {
     override fun onInterrupt() {
         CartAssistController.interrupted()
         AutoBuyController.cancel()
+        ProductLinkImportController.cancel()
     }
 
     override fun onDestroy() {
         CartAssistController.disconnected(this)
         AutoBuyController.disconnected(this)
+        ProductLinkImportController.disconnected(this)
         super.onDestroy()
     }
 
     internal fun inspectCurrentWindow() {
+        if (ProductLinkImportController.isActive()) {
+            ProductLinkImportController.inspectWindow(rootInActiveWindow)
+            return
+        }
         if (AutoBuyController.isActive()) {
             AutoBuyController.inspectWindow(rootInActiveWindow)
             return

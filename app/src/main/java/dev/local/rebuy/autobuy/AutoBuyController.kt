@@ -12,6 +12,7 @@ import dev.local.rebuy.cart.CartAssistPolicy
 import dev.local.rebuy.cart.CartAssistService
 import dev.local.rebuy.data.RoutineItem
 import dev.local.rebuy.domain.CoupangProductLinks
+import dev.local.rebuy.importproduct.ProductLinkImportController
 import kotlinx.coroutines.CancellableContinuation
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -71,7 +72,7 @@ object AutoBuyController {
 
     fun startDryRun(context: Context, item: RoutineItem, profile: AutoBuyProfile): Boolean {
         check(Looper.myLooper() == Looper.getMainLooper())
-        if (isActive() || CartAssistController.currentSession() != null) return false
+        if (isActive() || CartAssistController.currentSession() != null || ProductLinkImportController.isActive()) return false
         verifiedPreviewRevisions.remove(profile.revisionId)
         mutableState.value = AutoBuyRuntimeState.Running("결제 전 확인을 준비하고 있습니다. 실제 구매는 차단돼 있습니다.")
         dryRunJob = scope.launch {
@@ -107,7 +108,7 @@ object AutoBuyController {
         if (!dryRun) {
             return@withContext AutoBuyOutcome.Blocked(AutoBuyPolicy.PURCHASE_BLOCKED_MESSAGE)
         }
-        if (current != null || CartAssistController.currentSession() != null) {
+        if (current != null || CartAssistController.currentSession() != null || ProductLinkImportController.isActive()) {
             return@withContext AutoBuyOutcome.Blocked("다른 구매 도우미가 실행 중입니다.")
         }
         if (!CartAssistController.isEnabled(context) || service == null) {

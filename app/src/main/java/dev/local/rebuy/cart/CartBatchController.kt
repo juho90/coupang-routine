@@ -3,6 +3,7 @@ package dev.local.rebuy.cart
 import android.content.Context
 import android.os.Looper
 import dev.local.rebuy.autobuy.AutoBuyController
+import dev.local.rebuy.importproduct.ProductLinkImportController
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -43,7 +44,7 @@ object CartBatchController {
             mutableState.value = CartBatchState(message = error.message ?: "등록 상품의 구매 조건을 확인해 주세요.")
             return false
         }
-        if (AutoBuyController.isActive() || CartAssistController.state.value is CartAssistState.Running) {
+        if (AutoBuyController.isActive() || CartAssistController.state.value is CartAssistState.Running || ProductLinkImportController.isActive()) {
             mutableState.value = CartBatchState(message = "다른 구매 도우미가 실행 중입니다. 실행을 마친 뒤 다시 시작해 주세요.")
             return false
         }

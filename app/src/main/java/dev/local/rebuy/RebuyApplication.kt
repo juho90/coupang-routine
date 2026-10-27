@@ -22,7 +22,7 @@ class RebuyApplication : Application() {
 
 class AppContainer(context: Context) {
     val database = Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, "rebuy.db")
-        .addMigrations(AppDatabase.MIGRATION_1_2)
+        .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3)
         .build()
     val repository = RoutineRepository(database)
     val settings = SettingsRepository(context.applicationContext)
