@@ -47,6 +47,7 @@ import dev.local.rebuy.autobuy.AutoBuyStore
 import dev.local.rebuy.autobuy.AutoBuyController
 import dev.local.rebuy.cart.CartAssistPolicy
 import dev.local.rebuy.cart.CartAssistController
+import dev.local.rebuy.cart.CartBatchController
 import dev.local.rebuy.data.PurchaseRecord
 import dev.local.rebuy.data.RoutineItem
 import dev.local.rebuy.domain.CoupangUrl
@@ -90,12 +91,16 @@ fun RebuyApp(
 ) {
     MaterialTheme(colorScheme = if (isSystemInDarkTheme()) darkColors else lightColors) {
         val state by viewModel.state.collectAsStateWithLifecycle()
-        val busy by viewModel.busy.collectAsStateWithLifecycle()
+        val repositoryBusy by viewModel.busy.collectAsStateWithLifecycle()
+        val batchState by CartBatchController.state.collectAsStateWithLifecycle()
+        var batchPreparing by remember { mutableStateOf(false) }
+        val busy = repositoryBusy || batchState.running || batchPreparing
         val completion by viewModel.completionPrompt.collectAsStateWithLifecycle()
         val snackbar = remember { SnackbarHostState() }
         val scope = rememberCoroutineScope()
         val context = LocalContext.current
         val lifecycleOwner = LocalLifecycleOwner.current
+        LaunchedEffect(context) { CartBatchController.restore(context) }
         var today by remember { mutableLongStateOf(LocalDate.now().toEpochDay()) }
         var notificationsAllowed by remember { mutableStateOf(NotificationManagerCompat.from(context).areNotificationsEnabled()) }
         var permissionRequested by rememberSaveable { mutableStateOf(false) }
@@ -172,14 +177,15 @@ fun RebuyApp(
         var editorId by rememberSaveable { mutableStateOf<String?>(null) }
         var archiveId by rememberSaveable { mutableStateOf<String?>(null) }
         var showCartAssist by rememberSaveable { mutableStateOf(false) }
+        var showCartBatch by rememberSaveable { mutableStateOf(false) }
         var cartAssistUrl by rememberSaveable { mutableStateOf("") }
         var cartAssistTitle by rememberSaveable { mutableStateOf("") }
         var cartAssistOption by rememberSaveable { mutableStateOf("") }
         var cartAssistQuantity by rememberSaveable { mutableIntStateOf(1) }
         var showAutoBuy by rememberSaveable { mutableStateOf(false) }
         var autoBuyItemId by rememberSaveable { mutableStateOf<String?>(null) }
-        LaunchedEffect(incomingImage?.id, state.loading, state.loadError, busy) {
-            if (incomingImage != null && !state.loading && state.loadError == null && !busy) {
+        LaunchedEffect(incomingImage?.id, state.loading, state.loadError, busy, showCartBatch) {
+            if (incomingImage != null && !state.loading && state.loadError == null && !busy && !showCartBatch) {
                 if (showCartAssist) {
                     // Keep the cart URL and unsaved conditions while its image review opens.
                     CartAssistController.cancel()
@@ -196,15 +202,34 @@ fun RebuyApp(
             }
         }
         val onAutoBuy: (RoutineItem?) -> Unit = { item ->
-            autoBuyItemId = item?.id
-            showAutoBuy = true
+            if (!busy) {
+                autoBuyItemId = item?.id
+                showAutoBuy = true
+            }
         }
         val onCartAssist: (RoutineItem?) -> Unit = { item ->
-            cartAssistUrl = item?.productUrl.orEmpty()
-            cartAssistTitle = item?.title.orEmpty()
-            cartAssistOption = item?.purchaseOption.orEmpty()
-            cartAssistQuantity = item?.quantity ?: 1
-            showCartAssist = true
+            if (!busy) {
+                cartAssistUrl = item?.productUrl.orEmpty()
+                cartAssistTitle = item?.title.orEmpty()
+                cartAssistOption = item?.purchaseOption.orEmpty()
+                cartAssistQuantity = item?.quantity ?: 1
+                showCartAssist = true
+            }
+        }
+        val onCartBatch: () -> Unit = {
+            if (batchState.running) showCartBatch = true
+            else if (!busy) {
+                if (CartAssistController.state.value is dev.local.rebuy.cart.CartAssistState.Running || AutoBuyController.isActive()) {
+                    scope.launch { snackbar.showSnackbar("다른 구매 도우미가 실행 중입니다. 실행을 마친 뒤 다시 시작해 주세요.") }
+                } else {
+                    showEditor = false
+                    showCartAssist = false
+                    showAutoBuy = false
+                    archiveId = null
+                    viewModel.dismissCompletion()
+                    showCartBatch = true
+                }
+            }
         }
         val onOpen: (String) -> Unit = { url ->
             if (!openProduct(url)) scope.launch { snackbar.showSnackbar("쿠팡 URL을 열 수 없습니다. 브라우저 설치와 상품 주소를 확인해 주세요") }
@@ -227,7 +252,7 @@ fun RebuyApp(
                 }
             },
             floatingActionButton = {
-                if (tab == 0 && !state.loading && state.loadError == null) ExtendedFloatingActionButton(
+                if (tab == 0 && !state.loading && state.loadError == null && !busy) ExtendedFloatingActionButton(
                     onClick = { editorId = null; showEditor = true },
                     modifier = Modifier.testTag("add-product").semantics { contentDescription = "상품 등록" },
                     icon = { Text("+", fontSize = 25.sp) }, text = { Text("상품 등록") },
@@ -249,6 +274,7 @@ fun RebuyApp(
                         onOpen = onOpen, onComplete = viewModel::requestCompletion,
                         onCartAssist = { onCartAssist(it) },
                         onAutoBuy = { onAutoBuy(it) },
+                        batchRunning = batchState.running, onCartBatch = onCartBatch,
                     )
                     tab == 1 -> HistoryList(state.history, onOpen)
                     else -> SettingsScreen(state.settings, notificationsAllowed, busy, requestPermission, ::openNotificationSettings, viewModel::updateSettings, { onCartAssist(null) }, { onAutoBuy(null) })
@@ -274,6 +300,12 @@ fun RebuyApp(
             onIncomingImageConsumed = onIncomingImageConsumed,
             onDismiss = { showCartAssist = false },
         )
+        if (showCartBatch && !state.loading) CartBatchDialog(
+            items = state.items,
+            onPreparingChanged = { batchPreparing = it },
+            onDismiss = { showCartBatch = false },
+        )
+
         if (showAutoBuy) AutoBuyDialog(
             items = state.items.filterNot { it.archived },
             initialItemId = autoBuyItemId,
@@ -316,6 +348,7 @@ private fun RoutineList(
     onArchive: (RoutineItem) -> Unit, onOpen: (String) -> Unit, onComplete: (RoutineItem) -> Unit,
     onCartAssist: (RoutineItem) -> Unit,
     onAutoBuy: (RoutineItem) -> Unit,
+    batchRunning: Boolean, onCartBatch: () -> Unit,
 ) {
     val all = source.filterNot { it.archived }
     val dueCount = all.count { it.enabled && it.nextPurchaseEpochDay <= today }
@@ -333,6 +366,14 @@ private fun RoutineList(
                 Text(if (dueCount > 0) "오늘 챙길 상품이 ${dueCount}개 있어요." else "자주 사는 상품의 다음 구매일을 챙겨드려요.", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
+        item {
+            Button(
+                onClick = onCartBatch,
+                enabled = batchRunning || (!busy && all.any { it.enabled }),
+                modifier = Modifier.fillMaxWidth().testTag("cart-batch-open"),
+            ) { Text(if (batchRunning) "모두 담기 진행 보기" else "등록 상품 모두 담기") }
+        }
+
         if (!notificationsAllowed) item {
             Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = RoundedCornerShape(18.dp)) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {

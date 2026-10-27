@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "id": "two-distinct-products",
+  "products": [
+    "coupang-product.json",
+    "coupang-porridge.json"
+  ],
+  "baselineCart": "empty",
+  "expectedFinalQuantityPerProduct": 1
+}

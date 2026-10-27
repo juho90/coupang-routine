@@ -306,10 +306,10 @@ internal fun CartAssistDialog(
     )
 }
 
-private data class CartShareResolution(val id: Long, val url: String, val title: String, val option: String, val verifyOnly: Boolean)
+internal data class CartShareResolution(val id: Long, val url: String, val title: String, val option: String, val verifyOnly: Boolean)
 
 @Composable
-private fun CartShareResolutionPanel(request: CartShareResolution, onResolved: (String) -> Unit, onFailure: (String) -> Unit) {
+internal fun CartShareResolutionPanel(request: CartShareResolution, onResolved: (String) -> Unit, onFailure: (String) -> Unit) {
     val context = LocalContext.current
     val resolvedCallback by rememberUpdatedState(onResolved)
     val failureCallback by rememberUpdatedState(onFailure)
