@@ -12,7 +12,8 @@ import android.os.Build
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -25,7 +26,6 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
@@ -72,17 +72,6 @@ import kotlinx.coroutines.Job
 
 private val dateFormat = DateTimeFormatter.ofPattern("M월 d일 (E)", Locale.KOREA)
 private val historyFormat = DateTimeFormatter.ofPattern("yyyy.MM.dd HH:mm", Locale.KOREA)
-private val lightColors = lightColorScheme(
-    primary = Color(0xFF146653), onPrimary = Color.White,
-    primaryContainer = Color(0xFFD3F1E6), onPrimaryContainer = Color(0xFF104F41),
-    secondary = Color(0xFF54665E), background = Color(0xFFF7FAF7),
-    surface = Color(0xFFFCFDF9), surfaceVariant = Color(0xFFE7EDE7),
-)
-private val darkColors = darkColorScheme(
-    primary = Color(0xFF9AD6BE), onPrimary = Color(0xFF003829),
-    primaryContainer = Color(0xFF18503F), onPrimaryContainer = Color(0xFFB6F2D8),
-)
-
 @Composable
 fun RebuyApp(
     viewModel: RoutineViewModel,
@@ -92,7 +81,7 @@ fun RebuyApp(
     incomingImage: IncomingProductImage? = null,
     onIncomingImageConsumed: () -> Unit = {},
 ) {
-    MaterialTheme(colorScheme = if (isSystemInDarkTheme()) darkColors else lightColors) {
+    RebuyTheme {
         val state by viewModel.state.collectAsStateWithLifecycle()
         val repositoryBusy by viewModel.busy.collectAsStateWithLifecycle()
         val batchState by CartBatchController.state.collectAsStateWithLifecycle()
@@ -241,18 +230,31 @@ fun RebuyApp(
             if (!openProduct(url)) scope.launch { snackbar.showSnackbar("쿠팡 URL을 열 수 없습니다. 브라우저 설치와 상품 주소를 확인해 주세요") }
         }
         Scaffold(
+            containerColor = MaterialTheme.colorScheme.background,
             topBar = {
-                CenterAlignedTopAppBar(
-                    title = { Text("다시담기", fontWeight = FontWeight.Bold, letterSpacing = (-0.5).sp) },
-                    actions = { Text("LOCAL", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(end = 20.dp)) },
+                TopAppBar(
+                    title = {
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                            RebuyIcon(RebuyIconKind.Basket, tint = MaterialTheme.colorScheme.primary)
+                            Text("다시담기", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                        }
+                    },
+                    actions = {
+                        Surface(color = MaterialTheme.colorScheme.surfaceContainer, shape = RoundedCornerShape(50)) {
+                            Text("내 기기 보관", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp))
+                        }
+                        Spacer(Modifier.width(20.dp))
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
                 )
             },
             bottomBar = {
-                NavigationBar {
-                    listOf("구매 목록" to "▤", "구매 이력" to "✓", "설정" to "⚙").forEachIndexed { index, (label, symbol) ->
+                NavigationBar(containerColor = MaterialTheme.colorScheme.surface, tonalElevation = 0.dp) {
+                    listOf("구매 목록" to RebuyIconKind.Basket, "구매 이력" to RebuyIconKind.History, "설정" to RebuyIconKind.Settings).forEachIndexed { index, (label, icon) ->
                         NavigationBarItem(
                             selected = tab == index, onClick = { tab = index },
-                            icon = { Text(symbol, fontSize = 22.sp) }, label = { Text(label) },
+                            icon = { RebuyIcon(icon) }, label = { Text(label) },
+                            colors = NavigationBarItemDefaults.colors(indicatorColor = MaterialTheme.colorScheme.primaryContainer),
                         )
                     }
                 }
@@ -261,7 +263,10 @@ fun RebuyApp(
                 if (tab == 0 && !state.loading && state.loadError == null && !busy) ExtendedFloatingActionButton(
                     onClick = { editorId = null; showEditor = true },
                     modifier = Modifier.testTag("add-product").semantics { contentDescription = "상품 등록" },
-                    icon = { Text("+", fontSize = 25.sp) }, text = { Text("상품 등록") },
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary,
+                    shape = RoundedCornerShape(20.dp),
+                    icon = { RebuyIcon(RebuyIconKind.Plus) }, text = { Text("상품 등록") },
                 )
             },
             snackbarHost = { SnackbarHost(snackbar) },
@@ -377,20 +382,35 @@ private fun RoutineList(
     LazyColumn(
         modifier = Modifier.fillMaxSize().testTag("routine-list"),
         contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 100.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         item {
-            Column(Modifier.padding(vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
-                Text("필요한 날, 다시 담아요", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                Text(if (dueCount > 0) "오늘 챙길 상품이 ${dueCount}개 있어요." else "자주 사는 상품의 다음 구매일을 챙겨드려요.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row(Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 6.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("나의 구매 루틴", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                    Text("필요한 날, 다시 담아요", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                    Text("자주 사는 상품을 한곳에서 챙기세요.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = RoundedCornerShape(20.dp)) {
+                    Column(Modifier.width(76.dp).padding(vertical = 12.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(dueCount.toString(), style = MaterialTheme.typography.headlineMedium, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                        Text("구매 대기", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                    }
+                }
             }
         }
         item {
             Button(
                 onClick = onCartBatch,
                 enabled = batchRunning || (!busy && all.any { it.enabled }),
-                modifier = Modifier.fillMaxWidth().testTag("cart-batch-open"),
-            ) { Text(if (batchRunning) "담기 진행 보기" else "모두 장바구니에 담기") }
+                modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp).testTag("cart-batch-open"),
+                shape = RoundedCornerShape(14.dp),
+            ) {
+                RebuyIcon(RebuyIconKind.Basket, Modifier.size(20.dp))
+                Spacer(Modifier.width(10.dp))
+                Text(if (batchRunning) "담기 진행 보기" else "모두 장바구니에 담기", modifier = Modifier.weight(1f))
+                RebuyIcon(RebuyIconKind.ArrowRight, Modifier.size(18.dp))
+            }
         }
 
         if (!notificationsAllowed) item {
@@ -405,7 +425,7 @@ private fun RoutineList(
             Text("모든 알림이 꺼져 있습니다. 설정에서 다시 켤 수 있어요.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
         }
         item {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf("전체 ${all.size}", "예정 ${all.count { it.enabled }}", "일시정지 ${all.count { !it.enabled }}").forEachIndexed { index, text ->
                     FilterChip(selected = filter == index, onClick = { filter = index }, label = { Text(text) })
                 }
@@ -438,19 +458,36 @@ private fun RoutineCard(
     var variantMenu by remember { mutableStateOf(false) }
     val variants = remember(item.productVariantsJson) { ProductVariantCodec.decode(item.productVariantsJson) }
     Card(
-        modifier = Modifier.testTag("routine-card"),
-        colors = CardDefaults.cardColors(containerColor = if (isDue) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface),
-        shape = RoundedCornerShape(22.dp),
+        modifier = Modifier.fillMaxWidth().testTag("routine-card"),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        shape = RoundedCornerShape(20.dp),
     ) {
-        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    when { !item.enabled -> "일시정지"; item.nextPurchaseEpochDay < today -> "예정일 지남"; isDue -> "오늘 구매 예정"; else -> "${item.nextPurchaseEpochDay - today}일 뒤" },
-                    color = if (isDue) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f),
-                )
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.Top) {
+                Surface(color = MaterialTheme.colorScheme.surfaceContainer, shape = RoundedCornerShape(14.dp)) {
+                    Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) {
+                        RebuyIcon(RebuyIconKind.Basket, tint = MaterialTheme.colorScheme.primary)
+                    }
+                }
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Surface(
+                        color = if (isDue) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.surfaceContainer,
+                        contentColor = if (isDue) MaterialTheme.colorScheme.onTertiaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                        shape = RoundedCornerShape(6.dp),
+                    ) {
+                        Text(
+                            when { !item.enabled -> "일시정지"; item.nextPurchaseEpochDay < today -> "예정일 지남"; isDue -> "오늘 구매 예정"; else -> "${item.nextPurchaseEpochDay - today}일 뒤" },
+                            style = MaterialTheme.typography.labelSmall,
+                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
+                        )
+                    }
+                    Text(item.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                }
                 Box {
-                    TextButton(onClick = { menu = true }, enabled = !busy, modifier = Modifier.size(40.dp).semantics { contentDescription = "${item.title} 관리" }, contentPadding = PaddingValues(0.dp)) { Text("⋯", fontSize = 24.sp) }
+                    IconButton(onClick = { menu = true }, enabled = !busy, modifier = Modifier.size(48.dp).semantics { contentDescription = "${item.title} 관리" }) {
+                        RebuyIcon(RebuyIconKind.More, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                     DropdownMenu(expanded = menu && !busy, onDismissRequest = { menu = false }) {
                         DropdownMenuItem(text = { Text("상품 수정") }, onClick = { menu = false; onEdit(item) })
                         DropdownMenuItem(text = { Text("결제 전 시험") }, onClick = { menu = false; onAutoBuy(item) })
@@ -459,32 +496,62 @@ private fun RoutineCard(
                     }
                 }
             }
-            Text(item.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, maxLines = 3, overflow = TextOverflow.Ellipsis)
-            item.purchaseOption?.let { Text("옵션  $it", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (variants.isNotEmpty()) Box {
-                    OutlinedButton(onClick = { variantMenu = true }, enabled = !busy, modifier = Modifier.testTag("product-variant-select")) { Text("옵션 선택 (${variants.size})") }
-                    DropdownMenu(expanded = variantMenu && !busy, onDismissRequest = { variantMenu = false }) {
-                        variants.forEach { variant ->
-                            DropdownMenuItem(
-                                text = { Text((if (variant.productUrl == item.productUrl) "✓ " else "") + variant.option) },
-                                onClick = { variantMenu = false; onSelectVariant(item, variant) },
-                            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.weight(1f)) {
+                    if (variants.isNotEmpty()) {
+                        OutlinedButton(
+                            onClick = { variantMenu = true }, enabled = !busy,
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("product-variant-select"),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                            shape = RoundedCornerShape(12.dp), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                        ) {
+                            Text("옵션 · ${item.purchaseOption.orEmpty()}", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            Spacer(Modifier.width(6.dp))
+                            RebuyIcon(RebuyIconKind.More, Modifier.size(18.dp))
                         }
+                        DropdownMenu(expanded = variantMenu && !busy, onDismissRequest = { variantMenu = false }) {
+                            variants.forEach { variant ->
+                                DropdownMenuItem(
+                                    text = { Text(variant.option) },
+                                    leadingIcon = { if (variant.productUrl == item.productUrl) RebuyIcon(RebuyIconKind.Check, Modifier.size(18.dp)) },
+                                    onClick = { variantMenu = false; onSelectVariant(item, variant) },
+                                )
+                            }
+                        }
+                    } else {
+                        Text("옵션 · ${item.purchaseOption.orEmpty()}", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
-                TextButton(onClick = { onAddVariant(item) }, enabled = !busy, modifier = Modifier.testTag("product-variant-add")) { Text("옵션 링크 추가") }
+                IconButton(onClick = { onAddVariant(item) }, enabled = !busy, modifier = Modifier.testTag("product-variant-add").semantics { contentDescription = "옵션 링크 추가" }) {
+                    RebuyIcon(RebuyIconKind.Plus, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
+                }
             }
-            item.maxTotalWon?.let { Text("결제 전 확인 한도  ${NumberFormat.getIntegerInstance(Locale.KOREA).format(it)}원", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-            Text("${item.quantity}개  ·  ${item.intervalDays}일마다", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text("다음 구매  ${formatDate(item.nextPurchaseEpochDay)}", style = MaterialTheme.typography.bodyMedium)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Text("다음 구매", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(formatDate(item.nextPurchaseEpochDay), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                }
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Text("수량 · 주기", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("${item.quantity}개 · ${item.intervalDays}일마다", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                }
+            }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                OutlinedButton(onClick = { onOpen(item.productUrl) }, modifier = Modifier.weight(1f), enabled = !busy) { Text("쿠팡 열기") }
-                Button(onClick = { onCartAssist(item) }, modifier = Modifier.weight(1f).testTag("cart-open"), enabled = !busy && item.quantity == 1) { Text("장바구니 담기") }
+                OutlinedButton(onClick = { onOpen(item.productUrl) }, modifier = Modifier.weight(0.9f).heightIn(min = 48.dp), shape = RoundedCornerShape(12.dp), enabled = !busy, contentPadding = PaddingValues(horizontal = 12.dp)) {
+                    Text("쿠팡 열기")
+                    Spacer(Modifier.width(6.dp))
+                    RebuyIcon(RebuyIconKind.ExternalLink, Modifier.size(16.dp))
+                }
+                Button(onClick = { onCartAssist(item) }, modifier = Modifier.weight(1.1f).heightIn(min = 48.dp).testTag("cart-open"), shape = RoundedCornerShape(12.dp), enabled = !busy && item.quantity == 1, contentPadding = PaddingValues(horizontal = 12.dp)) { Text("장바구니 담기") }
             }
             if (item.quantity != 1) Text("장바구니 담기는 현재 구매 수량 1개를 지원합니다.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            TextButton(onClick = { onComplete(item) }, enabled = item.enabled && !busy, contentPadding = PaddingValues(0.dp), modifier = Modifier.testTag("complete-purchase")) {
-                Text("구매 완료 기록")
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    item.maxTotalWon?.let { "결제 전 확인 한도 ${NumberFormat.getIntegerInstance(Locale.KOREA).format(it)}원" }.orEmpty(),
+                    modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                TextButton(onClick = { onComplete(item) }, enabled = item.enabled && !busy, contentPadding = PaddingValues(horizontal = 4.dp), modifier = Modifier.testTag("complete-purchase")) { Text("구매 완료 기록", style = MaterialTheme.typography.labelMedium) }
             }
         }
     }
@@ -496,22 +563,47 @@ private fun HistoryList(history: List<PurchaseRecord>, onOpen: (String) -> Unit)
         EmptyState("구매 이력이 쌓이는 곳", "쿠팡에서 구매한 뒤 완료를 확인하면\n상품과 수량, 완료 시간이 여기에 남아요.")
         return
     }
-    LazyColumn(contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    LazyColumn(contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item {
-            Text("나의 구매 기록", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-            Text("직접 확인한 구매 ${history.size}건", modifier = Modifier.padding(top = 8.dp, bottom = 12.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        items(history.sortedByDescending { it.completedAtEpochMillis }, key = { it.id }) { record ->
-            Card(shape = RoundedCornerShape(20.dp)) {
-                Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(Instant.ofEpochMilli(record.completedAtEpochMillis).atZone(ZoneId.systemDefault()).format(historyFormat), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-                    Text(record.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                    Text("${record.quantity}개 구매 · 예정일 ${formatDate(record.scheduledEpochDay)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    TextButton(onClick = { onOpen(record.productUrl) }, contentPadding = PaddingValues(0.dp)) { Text("상품 다시 보기") }
+            Row(
+                modifier = Modifier.padding(bottom = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = RoundedCornerShape(14.dp)) {
+                    Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) {
+                        RebuyIcon(RebuyIconKind.History, Modifier.size(22.dp), tint = MaterialTheme.colorScheme.primary)
+                    }
+                }
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("나의 구매 기록", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                    Text("직접 확인한 구매 ${history.size}건", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
-        item { Text("기록은 사용자의 완료 확인을 바탕으로 저장됩니다.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        items(history.sortedByDescending { it.completedAtEpochMillis }, key = { it.id }) { record ->
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+            ) {
+                Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        RebuyIcon(RebuyIconKind.Check, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+                        Text(Instant.ofEpochMilli(record.completedAtEpochMillis).atZone(ZoneId.systemDefault()).format(historyFormat), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Text(record.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    Text("${record.quantity}개 구매 · 예정일 ${formatDate(record.scheduledEpochDay)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    TextButton(onClick = { onOpen(record.productUrl) }, contentPadding = PaddingValues(0.dp)) {
+                        Text("상품 다시 보기")
+                        Spacer(Modifier.width(6.dp))
+                        RebuyIcon(RebuyIconKind.ExternalLink, Modifier.size(16.dp))
+                    }
+                }
+            }
+        }
+        item { Text("기록은 사용자의 완료 확인을 바탕으로 저장됩니다.", modifier = Modifier.padding(top = 2.dp, bottom = 16.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
     }
 }
 
@@ -526,49 +618,80 @@ private fun SettingsScreen(
     var hour by rememberSaveable(settings.hour) { mutableStateOf(settings.hour.toString().padStart(2, '0')) }
     var minute by rememberSaveable(settings.minute) { mutableStateOf(settings.minute.toString().padStart(2, '0')) }
     var error by rememberSaveable { mutableStateOf<String?>(null) }
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
-        Text("구매일을 챙기는 방법", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-        Card(shape = RoundedCornerShape(22.dp)) {
-            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        Column(Modifier.padding(bottom = 4.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("구매일을 챙기는 방법", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+            Text("알림과 기기 설정을 한곳에서 관리하세요.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        ) {
+            Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    RebuyIcon(RebuyIconKind.Bell, Modifier.size(24.dp), tint = MaterialTheme.colorScheme.primary)
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text("예정일 알림", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                         Text("등록한 모든 상품에 적용", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     Switch(checked = enabled, onCheckedChange = { enabled = it }, enabled = !busy)
                 }
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 Text("알림 시간", style = MaterialTheme.typography.labelLarge)
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedTextField(value = hour, onValueChange = { hour = it.take(2); error = null }, label = { Text("시 (0~23)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, enabled = !busy, modifier = Modifier.weight(1f))
-                    Text(":")
-                    OutlinedTextField(value = minute, onValueChange = { minute = it.take(2); error = null }, label = { Text("분 (0~59)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, enabled = !busy, modifier = Modifier.weight(1f))
+                    OutlinedTextField(value = hour, onValueChange = { hour = it.take(2); error = null }, label = { Text("시 (0~23)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, enabled = !busy, shape = RoundedCornerShape(14.dp), modifier = Modifier.weight(1f))
+                    Text(":", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    OutlinedTextField(value = minute, onValueChange = { minute = it.take(2); error = null }, label = { Text("분 (0~59)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, enabled = !busy, shape = RoundedCornerShape(14.dp), modifier = Modifier.weight(1f))
                 }
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
                 Button(onClick = {
                     val h = hour.toIntOrNull(); val m = minute.toIntOrNull()
                     if (h == null || h !in 0..23 || m == null || m !in 0..59) error = "올바른 시와 분을 입력해 주세요"
                     else onSave(enabled, h, m)
-                }, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("알림 설정 저장") }
+                }, enabled = !busy, shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("알림 설정 저장") }
                 Text("기기의 현재 시간대를 따릅니다. 절전 모드나 기기 상태에 따라 알림이 늦어질 수 있습니다.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
-        Card(shape = RoundedCornerShape(22.dp)) {
-            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("기기 알림 ${if (notificationsAllowed) "허용됨" else "꺼짐"}", fontWeight = FontWeight.SemiBold)
-                Text(if (notificationsAllowed) "알림이 오지 않으면 기기 설정에서 알림 채널도 확인해 주세요." else "예정일 알림을 받으려면 기기에서도 알림을 허용해 주세요.", style = MaterialTheme.typography.bodySmall)
-                TextButton(onClick = if (notificationsAllowed) openSystemSettings else requestPermission, contentPadding = PaddingValues(0.dp)) { Text(if (notificationsAllowed) "기기 알림 설정 열기" else "알림 허용 / 설정") }
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        ) {
+            Column(Modifier.padding(horizontal = 20.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    RebuyIcon(RebuyIconKind.Settings, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("기기 알림 ${if (notificationsAllowed) "허용됨" else "꺼짐"}", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                }
+                Text(if (notificationsAllowed) "알림이 오지 않으면 기기 설정에서 알림 채널도 확인해 주세요." else "예정일 알림을 받으려면 기기에서도 알림을 허용해 주세요.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                TextButton(onClick = if (notificationsAllowed) openSystemSettings else requestPermission, contentPadding = PaddingValues(0.dp)) {
+                    Text(if (notificationsAllowed) "기기 알림 설정 열기" else "알림 허용 / 설정")
+                    Spacer(Modifier.width(6.dp))
+                    RebuyIcon(RebuyIconKind.ArrowRight, Modifier.size(16.dp))
+                }
             }
         }
-        Card(shape = RoundedCornerShape(22.dp)) {
-            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("구매 조건 · 결제 전 시험", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                Text("실제 결제는 비활성화되어 있습니다. 상품·옵션·금액 한도를 저장하고 직접 시작한 시험에서 결제 전 단계까지만 확인합니다.", style = MaterialTheme.typography.bodySmall)
-                TextButton(onClick = onAutoBuy, enabled = !busy, contentPadding = PaddingValues(0.dp)) { Text("결제 전 시험 설정") }
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        ) {
+            Column(Modifier.padding(horizontal = 20.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("구매 조건 · 결제 전 시험", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                Text("실제 결제는 비활성화되어 있습니다. 상품·옵션·금액 한도를 저장하고 직접 시작한 시험에서 결제 전 단계까지만 확인합니다.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                TextButton(onClick = onAutoBuy, enabled = !busy, contentPadding = PaddingValues(0.dp)) {
+                    Text("결제 전 시험 설정")
+                    Spacer(Modifier.width(6.dp))
+                    RebuyIcon(RebuyIconKind.ArrowRight, Modifier.size(16.dp))
+                }
             }
         }
-        Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
-            Text("나만의 로컬 구매 메모", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            Text("상품과 구매 이력은 이 기기에 저장됩니다. 서버와 로그인 없이 사용하며, 앱을 삭제하면 저장한 정보도 삭제됩니다.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Column(Modifier.padding(top = 8.dp, bottom = 20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("나만의 로컬 구매 메모", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+            Text("상품과 구매 이력은 이 기기에 저장됩니다. 서버와 로그인 없이 사용하며, 앱을 삭제하면 저장한 정보도 삭제됩니다.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text("쿠팡 앱의 상품 화면을 확인해 장바구니에 담습니다. 주문·결제와 구매 완료 기록은 직접 확인해 주세요.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
@@ -603,28 +726,40 @@ private fun ItemEditor(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (item == null) "다시 살 상품 등록" else "상품 수정") },
+        shape = RoundedCornerShape(28.dp),
+        containerColor = MaterialTheme.colorScheme.surface,
+        title = {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                RebuyIcon(RebuyIconKind.Link, Modifier.size(24.dp), tint = MaterialTheme.colorScheme.primary)
+                Text(if (item == null) "다시 살 상품 등록" else "상품 수정", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+            }
+        },
         text = {
-            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 Text("선택한 옵션의 쿠팡 링크를 붙여 넣어 주세요.", style = MaterialTheme.typography.bodyMedium)
                 OutlinedTextField(
                     url, { url = it; title = ""; option = ""; identityChanged() },
                     label = { Text("쿠팡 상품 URL") }, placeholder = { Text("https://link.coupang.com/…") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri), minLines = 2, maxLines = 4,
+                    shape = RoundedCornerShape(14.dp),
                     enabled = inputEnabled, modifier = Modifier.fillMaxWidth().testTag("product-url"),
                 )
                 Button(onClick = {
                     if (runCatching { CoupangUrl.normalize(url) }.isFailure) error = "쿠팡 상품 링크를 먼저 입력해 주세요."
                     else showUrlImport = true
-                }, enabled = inputEnabled && url.isNotBlank(), modifier = Modifier.fillMaxWidth().testTag("product-url-import-open")) {
+                }, enabled = inputEnabled && url.isNotBlank(), shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("product-url-import-open")) {
                     Text(if (title.isBlank()) "링크에서 상품 불러오기" else "상품 정보 다시 불러오기")
                 }
-                Surface(color = MaterialTheme.colorScheme.surfaceContainerHigh, shape = RoundedCornerShape(16.dp)) {
-                    Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceContainerLow,
+                    shape = RoundedCornerShape(20.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                ) {
+                    Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("선택한 상품", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-                        Text(title.ifBlank { "링크에서 상품 정보를 불러와 주세요." }, fontWeight = FontWeight.SemiBold)
-                        if (option.isNotBlank()) Text("옵션 · $option", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        else Text("옵션은 링크에서 함께 확인합니다.", style = MaterialTheme.typography.bodySmall)
+                        Text(title.ifBlank { "링크에서 상품 정보를 불러와 주세요." }, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+                        if (option.isNotBlank()) Text("옵션 · $option", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        else Text("옵션은 링크에서 함께 확인합니다.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
                 if (!showManualDetails) TextButton(
@@ -632,9 +767,9 @@ private fun ItemEditor(
                     modifier = Modifier.testTag("product-details-edit"), contentPadding = PaddingValues(0.dp),
                 ) { Text("상품 정보 직접 보완") }
                 if (showManualDetails) {
-                    Text("읽지 못한 정보만 보완해 주세요. 상품을 열려면 링크가 필요합니다.", style = MaterialTheme.typography.bodySmall)
-                    OutlinedTextField(title, { title = it; identityChanged() }, label = { Text("상품명") }, singleLine = true, enabled = inputEnabled, modifier = Modifier.fillMaxWidth())
-                    OutlinedTextField(option, { option = it; identityChanged() }, label = { Text("구매 옵션") }, placeholder = { Text("예: 600ml, 2개") }, minLines = 1, maxLines = 3, enabled = inputEnabled, modifier = Modifier.fillMaxWidth().testTag("purchase-option"))
+                    Text("읽지 못한 정보만 보완해 주세요. 상품을 열려면 링크가 필요합니다.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    OutlinedTextField(title, { title = it; identityChanged() }, label = { Text("상품명") }, singleLine = true, enabled = inputEnabled, shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(option, { option = it; identityChanged() }, label = { Text("구매 옵션") }, placeholder = { Text("예: 600ml, 2개") }, minLines = 1, maxLines = 3, enabled = inputEnabled, shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth().testTag("purchase-option"))
                     ProductImageImport(
                         enabled = inputEnabled,
                         incomingImage = incomingImage,
@@ -648,15 +783,25 @@ private fun ItemEditor(
                         if (previous != Triple(title, url, option)) identityChanged() else changed()
                     }
                 }
-                OutlinedTextField(limit, { limit = it.take(18); changed() }, label = { Text("결제 전 확인 한도 (선택)") }, suffix = { Text("원") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, enabled = inputEnabled, modifier = Modifier.fillMaxWidth().testTag("purchase-limit"))
-                Text("비워도 상품 카드를 저장할 수 있습니다. 결제 전 시험에는 배송비를 포함한 금액 한도가 필요합니다.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    OutlinedTextField(quantity, { quantity = it.take(4); changed() }, label = { Text("구매 수량") }, suffix = { Text("개") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, enabled = inputEnabled, modifier = Modifier.weight(1f))
-                    OutlinedTextField(interval, { interval = it.take(4); changed() }, label = { Text("구매 주기") }, suffix = { Text("일") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, enabled = inputEnabled, modifier = Modifier.weight(1f))
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    RebuyIcon(RebuyIconKind.Calendar, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+                    Text("구매 일정", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
                 }
-                Text("다음 구매일", style = MaterialTheme.typography.labelLarge)
-                OutlinedButton(onClick = { showDatePicker = true }, modifier = Modifier.fillMaxWidth(), enabled = inputEnabled) { Text(LocalDate.ofEpochDay(date).format(DateTimeFormatter.ofPattern("yyyy년 M월 d일 (E)", Locale.KOREA))) }
-                if (item != null) Text("일정을 수정하면 이전 알림은 만료됩니다.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OutlinedTextField(quantity, { quantity = it.take(4); changed() }, label = { Text("구매 수량") }, suffix = { Text("개") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, enabled = inputEnabled, shape = RoundedCornerShape(14.dp), modifier = Modifier.weight(1f))
+                    OutlinedTextField(interval, { interval = it.take(4); changed() }, label = { Text("구매 주기") }, suffix = { Text("일") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, enabled = inputEnabled, shape = RoundedCornerShape(14.dp), modifier = Modifier.weight(1f))
+                }
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("다음 구매일", style = MaterialTheme.typography.labelLarge)
+                    OutlinedButton(onClick = { showDatePicker = true }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp), shape = RoundedCornerShape(14.dp), enabled = inputEnabled) { Text(LocalDate.ofEpochDay(date).format(DateTimeFormatter.ofPattern("yyyy년 M월 d일 (E)", Locale.KOREA))) }
+                    if (item != null) Text("일정을 수정하면 이전 알림은 만료됩니다.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(limit, { limit = it.take(18); changed() }, label = { Text("결제 전 확인 한도 (선택)") }, suffix = { Text("원") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, enabled = inputEnabled, shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth().testTag("purchase-limit"))
+                    Text("비워도 상품 카드를 저장할 수 있습니다. 결제 전 시험에는 배송비를 포함한 금액 한도가 필요합니다.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("item-editor-error")) }
             }
         },
@@ -717,7 +862,11 @@ private fun ItemEditor(
 @Composable
 private fun EmptyState(title: String, description: String, modifier: Modifier = Modifier) {
     Column(modifier.fillMaxWidth().padding(horizontal = 28.dp, vertical = 56.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("↻", fontSize = 44.sp, color = MaterialTheme.colorScheme.primary)
+        Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = RoundedCornerShape(24.dp)) {
+            Box(Modifier.size(80.dp), contentAlignment = Alignment.Center) {
+                RebuyIcon(RebuyIconKind.Basket, Modifier.size(36.dp), tint = MaterialTheme.colorScheme.primary)
+            }
+        }
         Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
         Text(description, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
     }
