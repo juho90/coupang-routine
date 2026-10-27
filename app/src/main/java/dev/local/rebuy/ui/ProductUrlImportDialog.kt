@@ -5,6 +5,7 @@ import android.provider.Settings
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
@@ -33,6 +34,7 @@ internal fun ProductUrlImportDialog(
     onApply: (ProductVariant) -> Unit,
     onDismiss: () -> Unit,
     onOpenChanged: (Boolean) -> Unit = {},
+    autoStart: Boolean = false,
 ) {
     val context = LocalContext.current
     val importState by ProductLinkImportController.state.collectAsStateWithLifecycle()
@@ -46,6 +48,8 @@ internal fun ProductUrlImportDialog(
     var option by rememberSaveable { mutableStateOf("") }
     var populatedFor by rememberSaveable { mutableStateOf<String?>(null) }
     var error by rememberSaveable { mutableStateOf<String?>(null) }
+    var autoStartConsumed by rememberSaveable { mutableStateOf(false) }
+    var showCorrection by rememberSaveable { mutableStateOf(false) }
     val openChanged by rememberUpdatedState(onOpenChanged)
     val reading = started && importState is ProductLinkImportState.Running
     val working = resolving != null || reading
@@ -67,6 +71,7 @@ internal fun ProductUrlImportDialog(
         if (populatedFor != requestUrl) {
             title = suggestions.titleCandidates.firstOrNull().orEmpty()
             option = suggestions.optionCandidates.firstOrNull().orEmpty()
+            showCorrection = title.isBlank() || option.isBlank()
             populatedFor = requestUrl
         }
     }
@@ -78,6 +83,7 @@ internal fun ProductUrlImportDialog(
         populatedFor = null
         title = ""
         option = ""
+        showCorrection = false
         if (!ProductLinkImportController.start(context, canonical)) {
             val failure = ProductLinkImportController.state.value as? ProductLinkImportState.Finished
             started = false
@@ -94,9 +100,31 @@ internal fun ProductUrlImportDialog(
         onDismiss()
     }
 
+    fun beginRead() {
+        error = null
+        val normalized = runCatching { CoupangUrl.normalize(url) }.getOrNull()
+        if (normalized == null) error = "쿠팡 상품 링크를 입력해 주세요."
+        else {
+            val direct = runCatching { CoupangCartProductLink.parse(normalized) }.getOrNull()
+            if (direct != null) startRead(direct.canonicalUrl)
+            else {
+                started = false
+                sequence += 1
+                resolvingWasPending = true
+                resolving = CartShareResolution(sequence, normalized, "", "", true)
+            }
+        }
+    }
+    LaunchedEffect(autoStart) {
+        if (autoStart && !autoStartConsumed) {
+            autoStartConsumed = true
+            beginRead()
+        }
+    }
+
     AlertDialog(
         onDismissRequest = ::close,
-        title = { Text("URL에서 상품 정보 읽기") },
+        title = { Text("상품 정보 불러오기") },
         text = {
             Column(Modifier.heightIn(max = 540.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("쿠팡 앱에서 링크의 상품 화면을 읽어 상품명과 현재 선택 옵션을 제안합니다. 담기·주문·결제는 하지 않습니다.", style = MaterialTheme.typography.bodySmall)
@@ -108,21 +136,9 @@ internal fun ProductUrlImportDialog(
                     minLines = 2, maxLines = 4, enabled = !working,
                     modifier = Modifier.fillMaxWidth().testTag("product-url-import-url"),
                 )
-                Button(onClick = {
-                    error = null
-                    val normalized = runCatching { CoupangUrl.normalize(url) }.getOrNull()
-                    if (normalized == null) error = "쿠팡 상품 또는 공유 URL을 입력해 주세요."
-                    else {
-                        val direct = runCatching { CoupangCartProductLink.parse(normalized) }.getOrNull()
-                        if (direct != null) startRead(direct.canonicalUrl)
-                        else {
-                            started = false
-                            sequence += 1
-                            resolvingWasPending = true
-                            resolving = CartShareResolution(sequence, normalized, "", "", true)
-                        }
-                    }
-                }, enabled = !working && url.isNotBlank(), modifier = Modifier.fillMaxWidth().testTag("product-url-import-read")) { Text("상품 정보 불러오기") }
+                Button(onClick = ::beginRead, enabled = !working && url.isNotBlank(), modifier = Modifier.fillMaxWidth().testTag("product-url-import-read")) {
+                    Text(if (result == null) "상품 불러오기" else "다시 불러오기")
+                }
                 resolving?.let { request ->
                     CartShareResolutionPanel(request, onResolved = ::startRead, onFailure = {
                         resolving = null
@@ -136,20 +152,23 @@ internal fun ProductUrlImportDialog(
                     Text("읽기가 끝나면 다시담기로 돌아옵니다. 돌아오지 않으면 다시담기를 열어 결과를 확인해 주세요.", style = MaterialTheme.typography.bodySmall)
                 }
                 result?.let { finished ->
-                    Text(finished.message, style = MaterialTheme.typography.bodySmall)
+                    if (finished.suggestions == null) Text(finished.message, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                     finished.suggestions?.let { suggestions ->
-                        Text("링크로 연 쿠팡 화면에서 읽은 후보입니다. 원하는 상품과 옵션인지 확인한 뒤 적용해 주세요.", style = MaterialTheme.typography.bodySmall)
-                        OutlinedTextField(title, { title = it; error = null }, label = { Text("상품명") }, minLines = 1, maxLines = 3, modifier = Modifier.fillMaxWidth().testTag("product-url-import-title"))
-                        if (suggestions.titleCandidates.size > 1) {
-                            Text("상품명 후보", style = MaterialTheme.typography.labelMedium)
-                            suggestions.titleCandidates.take(6).forEach { candidate -> TextButton(onClick = { title = candidate }) { Text(candidate) } }
+                        Text("링크의 상품과 옵션이 맞는지 확인해 주세요.", style = MaterialTheme.typography.bodySmall)
+                        Surface(color = MaterialTheme.colorScheme.surfaceContainerHigh, shape = MaterialTheme.shapes.medium) {
+                            Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(title.ifBlank { "상품명 확인 필요" }, style = MaterialTheme.typography.titleMedium)
+                                Text("선택 옵션 · ${option.ifBlank { "확인 필요" }}")
+                            }
                         }
-                        OutlinedTextField(option, { option = it; error = null }, label = { Text("현재 선택 옵션") }, minLines = 1, maxLines = 3, modifier = Modifier.fillMaxWidth().testTag("product-url-import-option"))
-                        if (suggestions.optionCandidates.size > 1) {
-                            Text("옵션 후보", style = MaterialTheme.typography.labelMedium)
-                            suggestions.optionCandidates.take(8).forEach { candidate -> TextButton(onClick = { option = candidate }) { Text(candidate) } }
+                        if (!showCorrection) TextButton(onClick = { showCorrection = true }) { Text("읽은 정보 보완") }
+                        if (showCorrection) {
+                            OutlinedTextField(title, { title = it; error = null }, label = { Text("상품명") }, minLines = 1, maxLines = 3, modifier = Modifier.fillMaxWidth().testTag("product-url-import-title"))
+                            if (suggestions.titleCandidates.size > 1) suggestions.titleCandidates.take(6).forEach { candidate -> TextButton(onClick = { title = candidate }) { Text(candidate) } }
+                            OutlinedTextField(option, { option = it; error = null }, label = { Text("현재 선택 옵션") }, minLines = 1, maxLines = 3, modifier = Modifier.fillMaxWidth().testTag("product-url-import-option"))
+                            if (suggestions.optionCandidates.size > 1) suggestions.optionCandidates.take(8).forEach { candidate -> TextButton(onClick = { option = candidate }) { Text(candidate) } }
                         }
-                        Text("전체 판매 옵션을 자동 수집하는 기능은 아닙니다. 같은 상품의 다른 옵션 URL을 카드에서 추가하면 카드 안에서 선택할 수 있습니다.", style = MaterialTheme.typography.bodySmall)
+                        Text("다른 옵션은 해당 옵션의 링크를 카드에 추가해 선택할 수 있습니다.", style = MaterialTheme.typography.bodySmall)
                     }
                 }
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
@@ -160,7 +179,7 @@ internal fun ProductUrlImportDialog(
             }
         },
         confirmButton = {
-            if (!working && result?.suggestions != null) Button(onClick = {
+            if (!working && result?.suggestions != null) Button(enabled = title.isNotBlank() && option.isNotBlank(), onClick = {
                 try {
                     val variant = ProductVariantCodec.validate(listOf(ProductVariant(title.trim(), option.trim(), requireNotNull(requestUrl)))).single()
                     onApply(variant)

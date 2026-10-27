@@ -5,14 +5,12 @@ import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertTextContains
-import androidx.compose.ui.test.hasAnyAncestor
-import androidx.compose.ui.test.hasAnyDescendant
 import androidx.compose.ui.test.hasSetTextAction
-import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -67,10 +65,10 @@ class IntegratedConditionsDeviceTest {
                 compose.onAllNodesWithTag("purchase-option").fetchSemanticsNodes().isEmpty()
             }
             compose.onNodeWithTag("routine-list").performScrollToNode(hasText(title))
-            val card = hasTestTag("routine-card") and hasAnyDescendant(hasText(title))
-            val conditionsButton = compose.onNode(hasText("구매 조건 · 결제 전 시험") and hasAnyAncestor(card))
-            awaitCardAction(conditionsButton)
-            conditionsButton.performScrollTo().performClick()
+            val management = compose.onNodeWithContentDescription("$title 관리")
+            awaitCardAction(management)
+            management.performScrollTo().performClick()
+            compose.onNodeWithText("결제 전 시험").performClick()
 
             compose.waitUntil(10_000) {
                 compose.onAllNodesWithTag("saved-purchase-option").fetchSemanticsNodes().isNotEmpty()
@@ -82,6 +80,7 @@ class IntegratedConditionsDeviceTest {
             assertNoExternalExecution(container, original.id)
 
             compose.onNodeWithTag("edit-purchase-conditions").performScrollTo().assertIsEnabled().performClick()
+            compose.openManualProductFields()
             compose.waitUntil(10_000) {
                 compose.onAllNodesWithTag("purchase-option").fetchSemanticsNodes().isNotEmpty()
             }
@@ -145,8 +144,9 @@ class IntegratedConditionsDeviceTest {
     private fun openNewProduct(title: String) {
         compose.openRoutineList()
         compose.onNodeWithTag("add-product").assertIsDisplayed().performClick()
+        compose.onNodeWithTag("product-url").performScrollTo().performTextInput(PRODUCT_URL)
+        compose.openManualProductFields()
         compose.onNodeWithText("상품명").performScrollTo().performTextInput(title)
-        compose.onNodeWithText("쿠팡 상품 URL").performScrollTo().performTextInput(PRODUCT_URL)
     }
 
     private fun awaitItem(container: AppContainer, title: String, condition: (RoutineItem) -> Boolean): RoutineItem = runBlocking {

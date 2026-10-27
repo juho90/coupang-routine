@@ -165,8 +165,9 @@ class PcImageIncomingDeviceTest {
     private fun prepareUnsavedDraft(draft: EditorDraft) {
         compose.openRoutineList()
         compose.onNodeWithTag("add-product").assertIsDisplayed().performClick()
+        compose.onNodeWithTag("product-url").performScrollTo().performTextInput(draft.url)
+        compose.openManualProductFields()
         compose.onNodeWithText("상품명").performScrollTo().performTextInput(draft.title)
-        compose.onNodeWithText("쿠팡 상품 URL").performScrollTo().performTextInput(draft.url)
         compose.onNodeWithTag("purchase-option").performScrollTo().performTextInput(draft.option)
         compose.onNodeWithTag("purchase-limit").performScrollTo().performTextInput(draft.limit)
         compose.onNodeWithText("구매 수량").performScrollTo().performTextClearance()

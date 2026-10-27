@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -21,6 +22,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -71,6 +73,9 @@ internal fun CartAssistDialog(
     var url by rememberSaveable(initialUrl) { mutableStateOf(initialUrl) }
     var title by rememberSaveable(initialTitle) { mutableStateOf(initialTitle) }
     var option by rememberSaveable(initialOption) { mutableStateOf(initialOption) }
+    var showCorrection by rememberSaveable(initialUrl, initialTitle, initialOption) {
+        mutableStateOf(initialUrl.isBlank() || initialTitle.isBlank() || initialOption.isBlank())
+    }
     var serviceEnabled by remember { mutableStateOf(CartAssistController.isEnabled(context)) }
     var error by rememberSaveable { mutableStateOf<String?>(null) }
     var ownsAttempt by rememberSaveable { mutableStateOf(false) }
@@ -85,7 +90,7 @@ internal fun CartAssistDialog(
         // A WebView request belongs to the visible activity. Rotation never resumes a click.
         if (resolutionWasPending && resolution == null) {
             resolutionWasPending = false
-            error = "공유 링크 확인이 중단되었습니다. 점검 또는 추가 시작 버튼을 다시 눌러 주세요."
+            error = "공유 링크 확인이 중단되었습니다. 장바구니에 담기를 다시 눌러 주세요."
         }
     }
 
@@ -109,7 +114,10 @@ internal fun CartAssistDialog(
     }
 
     LaunchedEffect(incomingImage?.id) {
-        if (incomingImage != null) cancelAttempt()
+        if (incomingImage != null) {
+            cancelAttempt()
+            showCorrection = true
+        }
     }
 
     fun startResolved(canonicalUrl: String, requestTitle: String, requestOption: String, verifyOnly: Boolean) {
@@ -162,69 +170,74 @@ internal fun CartAssistDialog(
 
     AlertDialog(
         onDismissRequest = ::dismiss,
-        title = { Text("장바구니 담기 실험") },
+        title = { Text("장바구니 담기") },
         text = {
             Column(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Text("접근성 기능 사용 안내", fontWeight = FontWeight.SemiBold)
-                Text("쿠팡 앱에서만 상품을 엽니다. ‘담기 전 점검’은 상품명·옵션·담기 버튼만 확인하며 장바구니에 추가하지 않습니다.", style = MaterialTheme.typography.bodySmall)
-                Text(
-                    "‘1개 추가 시작’을 누르면 쿠팡 화면의 상품명·옵션·버튼을 읽고, 일치하면 장바구니 담기 버튼을 한 번 누릅니다. 화면 정보는 서버에 보내지 않습니다.",
-                    style = MaterialTheme.typography.bodySmall,
-                )
-                Text(
-                    "이미 장바구니에 있는 상품도 1개가 추가됩니다. 결제하거나 구매 완료를 기록하지 않습니다. 성공 여부가 불확실하면 쿠팡 장바구니를 먼저 확인해 주세요.",
-                    style = MaterialTheme.typography.bodySmall,
-                )
+                Text("등록한 링크의 상품과 선택 옵션을 쿠팡 장바구니에 담습니다.")
+                Surface(color = MaterialTheme.colorScheme.surfaceContainerHigh, shape = MaterialTheme.shapes.medium) {
+                    Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(title.ifBlank { "상품 정보를 먼저 확인해 주세요" }, fontWeight = FontWeight.SemiBold)
+                        Text("선택 옵션  ${option.ifBlank { "확인 필요" }}", style = MaterialTheme.typography.bodyMedium)
+                        Text(url.ifBlank { "상품 링크 필요" }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+                Text("상품의 담기 버튼을 한 번 누릅니다. 기존 장바구니 수량은 늘어날 수 있으니 실제 수량은 쿠팡에서 확인해 주세요.", style = MaterialTheme.typography.bodySmall)
+                Text("현재는 구매 수량 1개를 지원합니다. 금액 한도 확인·주문·결제·구매 완료 기록은 하지 않습니다.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 if (quantity != 1) Text(
-                    "이 실험은 구매 수량 1개만 지원합니다. 상품 수정에서 수량을 1개로 바꿔 주세요.",
+                    "상품 수정에서 구매 수량을 1개로 바꿔 주세요.",
                     color = MaterialTheme.colorScheme.error,
                 )
-                ProductImageImport(
-                    enabled = !busy,
-                    includePrice = false,
-                    incomingImage = incomingImage,
-                    onIncomingImageConsumed = onIncomingImageConsumed,
-                ) { draft ->
-                    if (draft.title.isNotBlank()) title = draft.title
-                    if (draft.option.isNotBlank()) option = draft.option
-                    draft.productUrl?.let { url = it }
-                    error = null
+                TextButton(onClick = { showCorrection = !showCorrection }, enabled = !busy, modifier = Modifier.testTag("cart-details-edit")) {
+                    Text(if (showCorrection) "정보 보완 닫기" else "정보 보완")
                 }
-                OutlinedTextField(
-                    value = url,
-                    onValueChange = { url = it; error = null },
-                    label = { Text("쿠팡 상품 또는 공유 URL") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
-                    minLines = 2,
-                    maxLines = 4,
-                    enabled = !busy,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                OutlinedTextField(
-                    value = title,
-                    onValueChange = { title = it; error = null },
-                    label = { Text("쿠팡 화면에 표시되는 상품명") },
-                    minLines = 1,
-                    maxLines = 3,
-                    enabled = !busy,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                OutlinedTextField(
-                    value = option,
-                    onValueChange = { option = it; error = null },
-                    label = { Text("화면에 표시되는 옵션") },
-                    placeholder = { Text("예: 600ml, 2개") },
-                    minLines = 1,
-                    maxLines = 3,
-                    enabled = !busy,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Text("상품명과 옵션을 쿠팡에 보이는 그대로 입력해 주세요. 등록해 둔 메모 이름과 실제 상품명이 다르면 수정해야 합니다.", style = MaterialTheme.typography.bodySmall)
+                if (showCorrection) {
+                    Text("링크가 우선입니다. 정보가 다르면 상품 수정에서 링크로 다시 불러오거나 아래에서 이번 담기의 정보만 보완해 주세요.", style = MaterialTheme.typography.bodySmall)
+                    ProductImageImport(
+                        enabled = !busy,
+                        includePrice = false,
+                        incomingImage = incomingImage,
+                        onIncomingImageConsumed = onIncomingImageConsumed,
+                    ) { draft ->
+                        if (draft.title.isNotBlank()) title = draft.title
+                        if (draft.option.isNotBlank()) option = draft.option
+                        draft.productUrl?.let { url = it }
+                        error = null
+                    }
+                    OutlinedTextField(
+                        value = url,
+                        onValueChange = { url = it; error = null },
+                        label = { Text("쿠팡 상품 또는 공유 URL") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                        minLines = 2,
+                        maxLines = 4,
+                        enabled = !busy,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    OutlinedTextField(
+                        value = title,
+                        onValueChange = { title = it; error = null },
+                        label = { Text("쿠팡 화면에 표시되는 상품명") },
+                        minLines = 1,
+                        maxLines = 3,
+                        enabled = !busy,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    OutlinedTextField(
+                        value = option,
+                        onValueChange = { option = it; error = null },
+                        label = { Text("화면에 표시되는 옵션") },
+                        placeholder = { Text("예: 600ml, 2개") },
+                        minLines = 1,
+                        maxLines = 3,
+                        enabled = !busy,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
                 if (!serviceEnabled) {
-                    Text("Android 접근성 설정에서 ‘다시담기 구매 도우미’를 직접 켠 뒤 돌아와 주세요. 돌아온 뒤 시작 버튼을 다시 눌러야 합니다.", style = MaterialTheme.typography.bodySmall)
+                    Text("Android 접근성 설정에서 ‘다시담기 구매 도우미’를 켠 뒤 돌아와 장바구니에 담기를 눌러 주세요.", style = MaterialTheme.typography.bodySmall)
                     TextButton(
                         enabled = !busy,
                         onClick = {
@@ -259,16 +272,23 @@ internal fun CartAssistDialog(
                 }
                 if (ownsAttempt) when (val result = assistState) {
                     CartAssistState.Idle -> Unit
-                    is CartAssistState.Running -> Text(result.message, style = MaterialTheme.typography.bodySmall)
+                    is CartAssistState.Running -> {
+                        LinearProgressIndicator(Modifier.fillMaxWidth())
+                        Text(result.message, style = MaterialTheme.typography.bodySmall)
+                    }
                     is CartAssistState.Finished -> {
-                        if (result.verifiedOnly) Text("점검만 완료 · 장바구니에 추가하지 않았습니다.", fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodySmall)
+                        Text(when {
+                            result.verifiedOnly -> "상품 정보 확인 완료 · 추가하지 않았습니다"
+                            result.success -> "담기 완료"
+                            else -> "담기를 마치지 못했습니다"
+                        }, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
                         Text(result.message, color = if (result.success) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                     }
                 }
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
                 if (diagnostics.stage != dev.local.rebuy.cart.CartAssistStage.IDLE) {
                     TextButton(onClick = { showDiagnostics = !showDiagnostics }) {
-                        Text(if (showDiagnostics) "실행 진단 접기" else "마지막 실행 진단 보기")
+                        Text(if (showDiagnostics) "상세 실행 기록 닫기" else "상세 실행 기록")
                     }
                     if (showDiagnostics) {
                         val diagnosticText = diagnostics.toDiagnosticText()
@@ -288,17 +308,14 @@ internal fun CartAssistDialog(
             if (busy) {
                 TextButton(onClick = ::cancelAttempt) { Text("실행 중단") }
             } else {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    androidx.compose.material3.OutlinedButton(
-                        enabled = quantity == 1 && serviceEnabled,
-                        onClick = { beginAttempt(verifyOnly = true) },
-                        modifier = Modifier.fillMaxWidth().testTag("cart-verify-only"),
-                    ) { Text("담기 전 점검") }
-                    Button(
-                        enabled = quantity == 1 && serviceEnabled,
-                        onClick = { beginAttempt(verifyOnly = false) },
-                        modifier = Modifier.fillMaxWidth().testTag("cart-add-one"),
-                    ) { Text("1개 추가 시작") }
+                Button(
+                    enabled = quantity == 1 && serviceEnabled,
+                    onClick = { beginAttempt(verifyOnly = false) },
+                    modifier = Modifier.fillMaxWidth().testTag("cart-add-one"),
+                ) {
+                    val completed = (assistState as? CartAssistState.Finished)
+                        ?.takeIf { ownsAttempt && it.success && !it.verifiedOnly }
+                    Text(if (completed != null) "한 번 더 담기" else "장바구니에 담기")
                 }
             }
         },

@@ -102,7 +102,7 @@ internal fun CartBatchDialog(items: List<RoutineItem>, onPreparingChanged: (Bool
         error = when {
             targets.isEmpty() -> "담을 상품이 없습니다. 상품을 등록하고 일시정지를 해제해 주세요."
             targets.size > 20 -> "한 번에 최대 20개 상품을 담을 수 있습니다."
-            invalid.isNotEmpty() -> "표시된 상품의 구매 수량을 1개로 맞추고 상품명·옵션·URL을 저장해 주세요."
+            invalid.isNotEmpty() -> "상품 수정에서 구매 수량을 1개로 맞추고 링크로 상품 정보를 불러와 주세요."
             CartAssistController.state.value is CartAssistState.Running || AutoBuyController.isActive() ->
                 "다른 구매 도우미가 실행 중입니다. 실행을 마친 뒤 다시 시작해 주세요."
             !CartAssistController.isEnabled(context) -> "Android 접근성 설정에서 다시담기 구매 도우미를 켜 주세요."
@@ -120,15 +120,16 @@ internal fun CartBatchDialog(items: List<RoutineItem>, onPreparingChanged: (Bool
 
     AlertDialog(
         onDismissRequest = ::dismiss,
-        title = { Text("등록 상품 모두 담기") },
+        title = { Text("등록 상품 담기") },
         text = {
             Column(Modifier.heightIn(max = 500.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("상품별 담기 버튼을 한 번씩 누릅니다. 기존 장바구니 수량은 늘어날 수 있으며 실제 수량은 쿠팡에서 확인해 주세요.")
-                Text("모든 상품 주소를 먼저 확인한 뒤 순서대로 진행합니다. 한 상품이 실패하면 나머지는 실행하지 않습니다. 주문·결제·구매 완료 기록은 하지 않습니다.", style = MaterialTheme.typography.bodySmall)
+                Text("등록한 활성 상품을 선택한 옵션으로 순서대로 담습니다. 다음 구매일과 관계없이 아래 상품 전체가 대상입니다.")
+                Text("한 번에 최대 20개 상품, 상품별 구매 수량 1개를 지원합니다. 담기 버튼을 상품마다 한 번씩 누르므로 기존 장바구니 수량은 늘어날 수 있습니다. 실제 수량은 쿠팡에서 확인해 주세요.", style = MaterialTheme.typography.bodySmall)
+                Text("상품 링크를 모두 확인한 뒤 시작합니다. 한 상품이 실패하면 나머지는 멈춥니다. 금액 한도 확인·주문·결제·구매 완료 기록은 하지 않습니다.", style = MaterialTheme.typography.bodySmall)
                 if (pausedCount > 0 || archivedCount > 0) Text("대상에서 제외: 일시정지 ${pausedCount}개 · 보관 ${archivedCount}개", style = MaterialTheme.typography.bodySmall)
                 if (preparing) {
                     LinearProgressIndicator(Modifier.fillMaxWidth())
-                    Text("상품 주소 확인 ${resolvingIndex + 1} / ${pending?.size ?: 0}")
+                    Text("상품 링크 확인 ${minOf(resolvingIndex + 1, pending?.size ?: 0)} / ${pending?.size ?: 0}")
                     val target = pending?.getOrNull(resolvingIndex)
                     if (target != null && runCatching { CoupangCartProductLink.parse(target.productUrl) }.isFailure) {
                         val activeSequence = sequence
@@ -167,11 +168,11 @@ internal fun CartBatchDialog(items: List<RoutineItem>, onPreparingChanged: (Bool
                         }
                     }
                 } else {
-                    Text("진행 대상 ${targets.size}개", fontWeight = FontWeight.SemiBold)
+                    Text("담을 상품 ${targets.size}개", fontWeight = FontWeight.SemiBold)
                     targets.forEach { target ->
                         Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                             Text(target.title, fontWeight = FontWeight.SemiBold)
-                            Text("옵션 ${target.option.ifBlank { "미입력" }} · 구매 수량 ${target.quantity}개", style = MaterialTheme.typography.bodySmall)
+                            Text("선택 옵션 ${target.option.ifBlank { "확인 필요" }} · 구매 수량 ${target.quantity}개", style = MaterialTheme.typography.bodySmall)
                             if (target in invalid) Text("등록 정보를 수정해야 합니다.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                         }
                     }
@@ -190,7 +191,7 @@ internal fun CartBatchDialog(items: List<RoutineItem>, onPreparingChanged: (Bool
             when {
                 batch.running -> TextButton(onClick = { CartBatchController.cancel() }, modifier = Modifier.testTag("cart-batch-cancel")) { Text("실행 중단") }
                 preparing -> TextButton(onClick = { stopPreparation("상품 주소 확인을 중단했습니다.") }) { Text("주소 확인 중단") }
-                !hasStarted -> Button(onClick = ::begin, enabled = targets.isNotEmpty() && targets.size <= 20 && invalid.isEmpty(), modifier = Modifier.testTag("cart-batch-start")) { Text("${targets.size}개 상품 담기 시작") }
+                !hasStarted -> Button(onClick = ::begin, enabled = targets.isNotEmpty() && targets.size <= 20 && invalid.isEmpty(), modifier = Modifier.testTag("cart-batch-start")) { Text("${targets.size}개 상품 담기") }
                 else -> Unit
             }
         },

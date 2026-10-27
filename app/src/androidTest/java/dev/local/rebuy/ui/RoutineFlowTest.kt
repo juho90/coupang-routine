@@ -6,6 +6,7 @@ import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasAnyDescendant
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
@@ -46,8 +47,9 @@ class RoutineFlowTest {
         try {
             compose.openRoutineList()
             compose.onNodeWithTag("add-product").assertIsDisplayed().performClick()
+            compose.onNodeWithTag("product-url").performScrollTo().performTextInput("https://www.coupang.com/vp/products/123456789")
+            compose.openManualProductFields()
             compose.onNodeWithText("상품명").performScrollTo().performTextInput(title)
-            compose.onNodeWithText("쿠팡 상품 URL").performScrollTo().performTextInput("https://www.coupang.com/vp/products/123456789")
             compose.onNodeWithTag("purchase-option").performScrollTo().performTextInput("2L, 6개입")
             compose.onNodeWithTag("purchase-limit").performScrollTo().performTextInput("18000")
             compose.onNodeWithText("구매 수량").performScrollTo().performTextClearance()
@@ -70,7 +72,7 @@ class RoutineFlowTest {
             assertEquals(18_000L, original.maxTotalWon)
             val earliestNextDate = LocalDate.now().plusDays(7).toEpochDay()
             val card = hasTestTag("routine-card") and hasAnyDescendant(hasText(title))
-            val completeButton = compose.onNode(hasText("구매 완료") and hasAnyAncestor(card))
+            val completeButton = compose.onNode(hasText("구매 완료 기록") and hasAnyAncestor(card))
             // Room emits the saved row before reminder reconciliation finishes. The button
             // deliberately remains disabled during that work, so wait for the actual UI state.
             compose.waitUntil(5_000) {
@@ -94,7 +96,7 @@ class RoutineFlowTest {
             } catch (failure: Throwable) {
                 throw AssertionError(compose.onRoot(useUnmergedTree = true).printToString(), failure)
             }
-            compose.onNodeWithText("구매 완료 기록").performClick()
+            compose.onNode(hasText("구매 완료 기록") and hasAnyAncestor(isDialog())).performClick()
             compose.waitUntil(10_000) {
                 runBlocking { container.repository.getItem(original.id)?.cycleId != original.cycleId }
             }

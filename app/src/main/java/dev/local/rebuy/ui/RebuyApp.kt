@@ -287,7 +287,7 @@ fun RebuyApp(
                         onAddVariant = { if (!busy) optionImportId = it.id },
                     )
                     tab == 1 -> HistoryList(state.history, onOpen)
-                    else -> SettingsScreen(state.settings, notificationsAllowed, busy, requestPermission, ::openNotificationSettings, viewModel::updateSettings, { onCartAssist(null) }, { onAutoBuy(null) })
+                    else -> SettingsScreen(state.settings, notificationsAllowed, busy, requestPermission, ::openNotificationSettings, viewModel::updateSettings, { onAutoBuy(null) })
                 }
             }
         }
@@ -392,7 +392,7 @@ private fun RoutineList(
                 onClick = onCartBatch,
                 enabled = batchRunning || (!busy && all.any { it.enabled }),
                 modifier = Modifier.fillMaxWidth().testTag("cart-batch-open"),
-            ) { Text(if (batchRunning) "모두 담기 진행 보기" else "등록 상품 모두 담기") }
+            ) { Text(if (batchRunning) "담기 진행 보기" else "모두 장바구니에 담기") }
         }
 
         if (!notificationsAllowed) item {
@@ -420,7 +420,7 @@ private fun RoutineList(
             RoutineCard(item, today, busy, onEdit, onToggle, onArchive, onOpen, onComplete, onCartAssist, onAutoBuy, onSelectVariant, onAddVariant)
         }
         if (visible.isNotEmpty()) item {
-            Text("쿠팡 열기로 직접 구매한 뒤 ‘구매 완료’를 눌러 주세요. 결제는 자동으로 진행되지 않습니다.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 6.dp))
+            Text("장바구니에서 주문한 뒤 구매 완료를 기록해 주세요. 결제는 직접 확인합니다.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 6.dp))
         }
     }
 }
@@ -453,8 +453,9 @@ private fun RoutineCard(
                 )
                 Box {
                     TextButton(onClick = { menu = true }, enabled = !busy, modifier = Modifier.size(40.dp).semantics { contentDescription = "${item.title} 관리" }, contentPadding = PaddingValues(0.dp)) { Text("⋯", fontSize = 24.sp) }
-                    DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                    DropdownMenu(expanded = menu && !busy, onDismissRequest = { menu = false }) {
                         DropdownMenuItem(text = { Text("상품 수정") }, onClick = { menu = false; onEdit(item) })
+                        DropdownMenuItem(text = { Text("결제 전 시험") }, onClick = { menu = false; onAutoBuy(item) })
                         DropdownMenuItem(text = { Text(if (item.enabled) "알림 일시정지" else "알림 다시 시작") }, onClick = { menu = false; onToggle(item) })
                         DropdownMenuItem(text = { Text("목록에서 보관") }, onClick = { menu = false; onArchive(item) })
                     }
@@ -474,21 +475,18 @@ private fun RoutineCard(
                         }
                     }
                 }
-                TextButton(onClick = { onAddVariant(item) }, enabled = !busy, modifier = Modifier.testTag("product-variant-add")) { Text("옵션 URL 추가") }
+                TextButton(onClick = { onAddVariant(item) }, enabled = !busy, modifier = Modifier.testTag("product-variant-add")) { Text("옵션 링크 추가") }
             }
-            item.maxTotalWon?.let { Text("금액 한도  ${NumberFormat.getIntegerInstance(Locale.KOREA).format(it)}원", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            item.maxTotalWon?.let { Text("결제 전 확인 한도  ${NumberFormat.getIntegerInstance(Locale.KOREA).format(it)}원", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
             Text("${item.quantity}개  ·  ${item.intervalDays}일마다", color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text("다음 구매  ${formatDate(item.nextPurchaseEpochDay)}", style = MaterialTheme.typography.bodyMedium)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                 OutlinedButton(onClick = { onOpen(item.productUrl) }, modifier = Modifier.weight(1f), enabled = !busy) { Text("쿠팡 열기") }
-                Button(onClick = { onComplete(item) }, modifier = Modifier.weight(1f), enabled = item.enabled && !busy) { Text("구매 완료") }
+                Button(onClick = { onCartAssist(item) }, modifier = Modifier.weight(1f).testTag("cart-open"), enabled = !busy && item.quantity == 1) { Text("장바구니 담기") }
             }
-            TextButton(onClick = { onCartAssist(item) }, enabled = !busy && item.quantity == 1, contentPadding = PaddingValues(0.dp)) {
-                Text("장바구니 담기 실험")
-            }
-            if (item.quantity != 1) Text("담기 실험은 구매 수량 1개만 지원합니다. 상품 수정에서 수량을 바꿔 주세요.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            TextButton(onClick = { onAutoBuy(item) }, enabled = !busy, contentPadding = PaddingValues(0.dp)) {
-                Text("구매 조건 · 결제 전 시험")
+            if (item.quantity != 1) Text("장바구니 담기는 현재 구매 수량 1개를 지원합니다.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            TextButton(onClick = { onComplete(item) }, enabled = item.enabled && !busy, contentPadding = PaddingValues(0.dp), modifier = Modifier.testTag("complete-purchase")) {
+                Text("구매 완료 기록")
             }
         }
     }
@@ -524,7 +522,6 @@ private fun SettingsScreen(
     settings: ReminderSettings, notificationsAllowed: Boolean, busy: Boolean,
     requestPermission: () -> Unit, openSystemSettings: () -> Unit,
     onSave: (Boolean, Int, Int) -> Unit,
-    onCartAssist: () -> Unit,
     onAutoBuy: () -> Unit,
 ) {
     var enabled by rememberSaveable(settings.notificationsEnabled) { mutableStateOf(settings.notificationsEnabled) }
@@ -566,13 +563,6 @@ private fun SettingsScreen(
         }
         Card(shape = RoundedCornerShape(22.dp)) {
             Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("쿠팡 장바구니 담기 실험", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                Text("직접 시작하면 상품과 옵션을 확인한 뒤 장바구니에 1개를 추가합니다. 쿠팡 화면이 바뀌거나 확인할 수 없으면 중단합니다.", style = MaterialTheme.typography.bodySmall)
-                TextButton(onClick = onCartAssist, enabled = !busy, contentPadding = PaddingValues(0.dp)) { Text("상품 URL로 담기 실험") }
-            }
-        }
-        Card(shape = RoundedCornerShape(22.dp)) {
-            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("구매 조건 · 결제 전 시험", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                 Text("실제 결제는 비활성화되어 있습니다. 상품·옵션·금액 한도를 저장하고 직접 시작한 시험에서 결제 전 단계까지만 확인합니다.", style = MaterialTheme.typography.bodySmall)
                 TextButton(onClick = onAutoBuy, enabled = !busy, contentPadding = PaddingValues(0.dp)) { Text("결제 전 시험 설정") }
@@ -581,7 +571,7 @@ private fun SettingsScreen(
         Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
             Text("나만의 로컬 구매 메모", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             Text("상품과 구매 이력은 이 기기에 저장됩니다. 서버와 로그인 없이 사용하며, 앱을 삭제하면 저장한 정보도 삭제됩니다.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text("다시담기는 쿠팡의 공식 앱이 아닙니다. 상품 가격이나 재고, 주문 결과를 조회하지 않습니다. 쿠팡에서 직접 구매한 뒤 완료를 확인해 주세요.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("쿠팡 앱의 상품 화면을 확인해 장바구니에 담습니다. 주문·결제와 구매 완료 기록은 직접 확인해 주세요.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
@@ -601,6 +591,7 @@ private fun ItemEditor(
     var option by rememberSaveable(key) { mutableStateOf(item?.purchaseOption.orEmpty()) }
     var variantsJson by rememberSaveable(key) { mutableStateOf(item?.productVariantsJson) }
     var showUrlImport by rememberSaveable(key) { mutableStateOf(false) }
+    var showManualDetails by rememberSaveable(key) { mutableStateOf(false) }
     var limit by rememberSaveable(key) { mutableStateOf(item?.maxTotalWon?.toString().orEmpty()) }
     var quantity by rememberSaveable(key) { mutableStateOf((item?.quantity ?: 1).toString()) }
     var interval by rememberSaveable(key) { mutableStateOf((item?.intervalDays ?: 30).toString()) }
@@ -615,6 +606,8 @@ private fun ItemEditor(
     val inputEnabled = !busy && !legacyLoading
     fun changed() { edited = true; error = null }
     fun identityChanged() { variantsJson = "[]"; changed() }
+
+    LaunchedEffect(incomingImage?.id) { if (incomingImage != null) showManualDetails = true }
 
     LaunchedEffect(key) {
         val original = item
@@ -658,28 +651,49 @@ private fun ItemEditor(
                     Text("이전 구매 조건을 확인하고 있어요.", style = MaterialTheme.typography.bodySmall)
                 }
                 legacyNotice?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
-                ProductImageImport(
-                    enabled = inputEnabled,
-                    incomingImage = incomingImage,
-                    onIncomingImageConsumed = onIncomingImageConsumed,
-                ) { draft ->
-                    val previous = Triple(title, url, option)
-                    if (draft.title.isNotBlank()) title = draft.title
-                    draft.productUrl?.let { url = it }
-                    if (draft.option.isNotBlank()) option = draft.option
-                    draft.displayedPriceWon?.let { limit = it.toString() }
-                    if (previous != Triple(title, url, option)) identityChanged() else changed()
+                Text("선택한 옵션의 쿠팡 링크를 붙여 넣어 주세요.", style = MaterialTheme.typography.bodyMedium)
+                OutlinedTextField(
+                    url, { url = it; title = ""; option = ""; identityChanged() },
+                    label = { Text("쿠팡 상품 URL") }, placeholder = { Text("https://link.coupang.com/…") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri), minLines = 2, maxLines = 4,
+                    enabled = inputEnabled, modifier = Modifier.fillMaxWidth().testTag("product-url"),
+                )
+                Button(onClick = {
+                    if (runCatching { CoupangUrl.normalize(url) }.isFailure) error = "쿠팡 상품 링크를 먼저 입력해 주세요."
+                    else showUrlImport = true
+                }, enabled = inputEnabled && url.isNotBlank(), modifier = Modifier.fillMaxWidth().testTag("product-url-import-open")) {
+                    Text(if (title.isBlank()) "링크에서 상품 불러오기" else "상품 정보 다시 불러오기")
                 }
-                Text("이미지에 상품 주소가 없으면 쿠팡 공유 링크를 별도로 붙여 넣어 주세요. 선택한 표시가격은 아래 금액 한도에 복사되므로 최종 구매 조건을 확인해 주세요.", style = MaterialTheme.typography.bodySmall)
-                OutlinedTextField(title, { title = it; identityChanged() }, label = { Text("상품명") }, placeholder = { Text("예: 생수 2L 6개입") }, singleLine = true, enabled = inputEnabled, modifier = Modifier.fillMaxWidth())
-                Text("쿠팡 화면에 표시되는 실제 상품명을 입력해 주세요. 결제 전 시험에서도 이 상품명으로 확인합니다.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                OutlinedTextField(url, { url = it; identityChanged() }, label = { Text("쿠팡 상품 URL") }, placeholder = { Text("https://www.coupang.com/…") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri), minLines = 2, maxLines = 4, enabled = inputEnabled, modifier = Modifier.fillMaxWidth())
-                Text("쿠팡의 상품 주소나 공유 링크를 붙여 넣어 주세요.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                OutlinedButton(onClick = { showUrlImport = true }, enabled = inputEnabled, modifier = Modifier.fillMaxWidth().testTag("product-url-import-open")) { Text("URL에서 상품 정보 읽기") }
-                if (ProductVariantCodec.decode(variantsJson).isNotEmpty()) Text("불러온 옵션을 카드에 함께 저장합니다. 상품명·URL·옵션을 직접 바꾸면 저장된 옵션 목록은 초기화됩니다.", style = MaterialTheme.typography.bodySmall)
-                OutlinedTextField(option, { option = it; identityChanged() }, label = { Text("구매 옵션") }, placeholder = { Text("예: 600ml, 2개") }, minLines = 1, maxLines = 3, enabled = inputEnabled, modifier = Modifier.fillMaxWidth().testTag("purchase-option"))
-                Text("쿠팡에 보이는 옵션을 그대로 입력해 주세요. 옵션의 ‘2개’ 같은 구성과 아래 구매 수량은 별개입니다.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                OutlinedTextField(limit, { limit = it.take(18); changed() }, label = { Text("금액 한도 (선택)") }, suffix = { Text("원") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, enabled = inputEnabled, modifier = Modifier.fillMaxWidth().testTag("purchase-limit"))
+                Surface(color = MaterialTheme.colorScheme.surfaceContainerHigh, shape = RoundedCornerShape(16.dp)) {
+                    Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("선택한 상품", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                        Text(title.ifBlank { "링크에서 상품 정보를 불러와 주세요." }, fontWeight = FontWeight.SemiBold)
+                        if (option.isNotBlank()) Text("옵션 · $option", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        else Text("옵션은 링크에서 함께 확인합니다.", style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+                if (!showManualDetails) TextButton(
+                    onClick = { showManualDetails = true }, enabled = inputEnabled,
+                    modifier = Modifier.testTag("product-details-edit"), contentPadding = PaddingValues(0.dp),
+                ) { Text("상품 정보 직접 보완") }
+                if (showManualDetails) {
+                    Text("읽지 못한 정보만 보완해 주세요. 상품을 열려면 링크가 필요합니다.", style = MaterialTheme.typography.bodySmall)
+                    OutlinedTextField(title, { title = it; identityChanged() }, label = { Text("상품명") }, singleLine = true, enabled = inputEnabled, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(option, { option = it; identityChanged() }, label = { Text("구매 옵션") }, placeholder = { Text("예: 600ml, 2개") }, minLines = 1, maxLines = 3, enabled = inputEnabled, modifier = Modifier.fillMaxWidth().testTag("purchase-option"))
+                    ProductImageImport(
+                        enabled = inputEnabled,
+                        incomingImage = incomingImage,
+                        onIncomingImageConsumed = onIncomingImageConsumed,
+                    ) { draft ->
+                        val previous = Triple(title, url, option)
+                        if (draft.title.isNotBlank()) title = draft.title
+                        draft.productUrl?.let { url = it }
+                        if (draft.option.isNotBlank()) option = draft.option
+                        draft.displayedPriceWon?.let { limit = it.toString() }
+                        if (previous != Triple(title, url, option)) identityChanged() else changed()
+                    }
+                }
+                OutlinedTextField(limit, { limit = it.take(18); changed() }, label = { Text("결제 전 확인 한도 (선택)") }, suffix = { Text("원") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, enabled = inputEnabled, modifier = Modifier.fillMaxWidth().testTag("purchase-limit"))
                 Text("비워도 상품 카드를 저장할 수 있습니다. 결제 전 시험에는 배송비를 포함한 금액 한도가 필요합니다.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     OutlinedTextField(quantity, { quantity = it.take(4); changed() }, label = { Text("구매 수량") }, suffix = { Text("개") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, enabled = inputEnabled, modifier = Modifier.weight(1f))
@@ -695,6 +709,8 @@ private fun ItemEditor(
             Button(enabled = inputEnabled, onClick = {
                 val q = quantity.toIntOrNull(); val days = interval.toIntOrNull(); val maximum = limit.toLongOrNull()
                 error = when {
+                    runCatching { CoupangUrl.normalize(url) }.isFailure -> "쿠팡 상품 링크를 먼저 입력해 주세요"
+                    title.isBlank() || option.isBlank() -> "링크에서 상품 정보를 불러온 뒤 저장해 주세요"
                     title.trim().length !in 1..100 -> "상품명은 1~100자로 입력해 주세요"
                     option.trim().length > 120 || CartAssistPolicy.normalize(option).length < 2 -> "구매 옵션은 문자·숫자 2자 이상, 전체 120자 이내로 입력해 주세요"
                     limit.isNotBlank() && (maximum == null || maximum !in 1L..100_000_000L) -> "금액 한도는 1원~1억원으로 입력해 주세요"
@@ -730,6 +746,7 @@ private fun ItemEditor(
         },
         onDismiss = { showUrlImport = false },
         onOpenChanged = onImportOpenChanged,
+        autoStart = true,
     )
     if (showDatePicker) {
         // Material DatePicker uses UTC midnight, not a timestamp in the device's time zone.

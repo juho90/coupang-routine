@@ -1,4 +1,4 @@
 <resources>
     <string name="app_name">다시담기</string>
-    <string name="cart_accessibility_description">직접 시작한 동안 쿠팡 상품 화면을 읽고 장바구니 담기 또는 결제 직전까지 시험합니다. 실제 결제와 자동 구매 예약은 비활성화되어 있습니다. 화면 정보는 서버로 전송하지 않습니다.</string>
+    <string name="cart_accessibility_description">직접 시작한 동안 쿠팡 상품 정보를 불러오고 장바구니에 담습니다. 결제 전 시험은 최종 결제를 누르지 않습니다. 실제 결제와 자동 구매 예약은 비활성화되어 있습니다. 화면 정보는 서버로 전송하지 않습니다.</string>
 </resources>

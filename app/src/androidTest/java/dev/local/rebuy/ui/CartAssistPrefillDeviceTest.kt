@@ -36,20 +36,21 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 
-/** Opens the local cart-test form only; never presses its start button or opens Coupang. */
+/** Opens the local cart form only; never presses its start button or opens Coupang. */
 @RunWith(AndroidJUnit4::class)
 class CartAssistPrefillDeviceTest {
     @get:Rule val compose = createAndroidComposeRule<MainActivity>()
 
-    @Test fun registeredOptionPrefillsCartTestAndTemporaryEditsNeverReplaceStoredConditions() {
+    @Test fun registeredOptionPrefillsCartAndTemporaryEditsNeverReplaceStoredConditions() {
         val title = "담기 옵션 재사용 ${UUID.randomUUID()}"
         val container = (compose.activity.application as RebuyApplication).container
         var created: RoutineItem? = null
         try {
             compose.openRoutineList()
             compose.onNodeWithTag("add-product").assertIsDisplayed().performClick()
+            compose.onNodeWithTag("product-url").performScrollTo().performTextInput(PRODUCT_URL)
+            compose.openManualProductFields()
             compose.onNodeWithText("상품명").performScrollTo().performTextInput(title)
-            compose.onNodeWithText("쿠팡 상품 URL").performScrollTo().performTextInput(PRODUCT_URL)
             compose.onNodeWithTag("purchase-option").performScrollTo().performTextInput(SAVED_OPTION)
             compose.onNodeWithTag("purchase-limit").performScrollTo().performTextInput("75000")
             compose.onNodeWithText("구매 수량").performScrollTo().performTextClearance()
@@ -67,12 +68,13 @@ class CartAssistPrefillDeviceTest {
             compose.waitUntil(10_000) { compose.onAllNodesWithTag("purchase-option").fetchSemanticsNodes().isEmpty() }
             compose.onNodeWithTag("routine-list").performScrollToNode(hasText(title))
             val ownCard = hasTestTag("routine-card") and hasAnyDescendant(hasText(title))
-            val cartButton = compose.onNode(hasText("장바구니 담기 실험") and hasAnyAncestor(ownCard))
+            val cartButton = compose.onNode(hasText("장바구니 담기") and hasAnyAncestor(ownCard))
             compose.waitUntil(10_000) { runCatching { cartButton.assertIsEnabled(); true }.getOrDefault(false) }
             compose.waitUntil(7_000) {
                 compose.onAllNodesWithText("상품을 저장했습니다", useUnmergedTree = true).fetchSemanticsNodes().isEmpty()
             }
             cartButton.performScrollTo().performClick()
+            compose.openCartProductFields()
             compose.onNodeWithText("화면에 표시되는 옵션").performScrollTo().assertIsDisplayed()
             assertEquals(SAVED_OPTION, optionValue())
 
@@ -84,6 +86,7 @@ class CartAssistPrefillDeviceTest {
 
             // Reopening uses the registered source value, rather than a previous trial's draft.
             cartButton.performScrollTo().assertIsEnabled().performClick()
+            compose.openCartProductFields()
             compose.onNodeWithText("화면에 표시되는 옵션").performScrollTo()
             assertEquals(SAVED_OPTION, optionValue())
             compose.onNodeWithText("닫기").performClick()
