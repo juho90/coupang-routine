@@ -267,7 +267,11 @@ fun RebuyApp(
                             onClick = onCartBatch,
                             enabled = batchState.running || (!busy && state.items.any { !it.archived && it.enabled }),
                             modifier = Modifier.heightIn(min = 48.dp).testTag("cart-batch-open"),
-                            shape = RoundedCornerShape(18.dp),
+                            shape = RoundedCornerShape(50),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.onSurface,
+                                contentColor = MaterialTheme.colorScheme.surface,
+                            ),
                             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
                             elevation = ButtonDefaults.elevatedButtonElevation(defaultElevation = 4.dp),
                         ) {
@@ -275,14 +279,22 @@ fun RebuyApp(
                             Spacer(Modifier.width(8.dp))
                             Text(if (batchState.running) "담기 진행 보기" else "예정 상품 담기 (${dueCount}개)")
                         }
-                        if (!busy) ExtendedFloatingActionButton(
+                        if (!busy) Button(
                             onClick = { editorId = null; showEditor = true },
-                            modifier = Modifier.testTag("add-product").semantics { contentDescription = "상품 등록" },
-                            containerColor = MaterialTheme.colorScheme.primary,
-                            contentColor = MaterialTheme.colorScheme.onPrimary,
-                            shape = RoundedCornerShape(20.dp),
-                            icon = { RebuyIcon(RebuyIconKind.Plus) }, text = { Text("상품 등록") },
-                        )
+                            modifier = Modifier.heightIn(min = 56.dp).testTag("add-product").semantics { contentDescription = "상품 등록" },
+                            shape = RoundedCornerShape(14.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.surface,
+                                contentColor = MaterialTheme.colorScheme.onSurface,
+                            ),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                            contentPadding = PaddingValues(horizontal = 18.dp, vertical = 14.dp),
+                            elevation = ButtonDefaults.elevatedButtonElevation(defaultElevation = 4.dp),
+                        ) {
+                            RebuyIcon(RebuyIconKind.Plus, Modifier.size(20.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text("상품 등록", style = MaterialTheme.typography.labelLarge)
+                        }
                     }
                 }
             },
