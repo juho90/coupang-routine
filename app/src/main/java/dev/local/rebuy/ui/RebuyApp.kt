@@ -240,12 +240,6 @@ fun RebuyApp(
                             Text("다시담기", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                         }
                     },
-                    actions = {
-                        Surface(color = MaterialTheme.colorScheme.surfaceContainer, shape = RoundedCornerShape(50)) {
-                            Text("내 기기 저장", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp))
-                        }
-                        Spacer(Modifier.width(20.dp))
-                    },
                     colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
                 )
             },
@@ -395,14 +389,6 @@ private fun RoutineList(
         contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 172.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        item {
-            Column(Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("나의 구매 일정", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-                Text("다시 살 때를 놓치지 않게", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                Text("옵션과 구매일을 확인하고, 필요할 때 다시 담으세요.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        }
-
         if (!notificationsAllowed) item {
             Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = RoundedCornerShape(18.dp)) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
