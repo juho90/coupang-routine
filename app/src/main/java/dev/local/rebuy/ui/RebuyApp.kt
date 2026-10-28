@@ -266,14 +266,30 @@ fun RebuyApp(
                 }
             },
             floatingActionButton = {
-                if (tab == 0 && !state.loading && state.loadError == null && !busy) ExtendedFloatingActionButton(
-                    onClick = { editorId = null; showEditor = true },
-                    modifier = Modifier.testTag("add-product").semantics { contentDescription = "상품 등록" },
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    contentColor = MaterialTheme.colorScheme.onPrimary,
-                    shape = RoundedCornerShape(20.dp),
-                    icon = { RebuyIcon(RebuyIconKind.Plus) }, text = { Text("상품 등록") },
-                )
+                if (tab == 0 && !state.loading && state.loadError == null) {
+                    Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Button(
+                            onClick = onCartBatch,
+                            enabled = batchState.running || (!busy && state.items.any { !it.archived && it.enabled }),
+                            modifier = Modifier.heightIn(min = 48.dp).testTag("cart-batch-open"),
+                            shape = RoundedCornerShape(18.dp),
+                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+                            elevation = ButtonDefaults.elevatedButtonElevation(defaultElevation = 4.dp),
+                        ) {
+                            RebuyIcon(RebuyIconKind.Basket, Modifier.size(20.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text(if (batchState.running) "담기 진행 보기" else "예정 상품 담기 (${dueCount}개)")
+                        }
+                        if (!busy) ExtendedFloatingActionButton(
+                            onClick = { editorId = null; showEditor = true },
+                            modifier = Modifier.testTag("add-product").semantics { contentDescription = "상품 등록" },
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary,
+                            shape = RoundedCornerShape(20.dp),
+                            icon = { RebuyIcon(RebuyIconKind.Plus) }, text = { Text("상품 등록") },
+                        )
+                    }
+                }
             },
             snackbarHost = { SnackbarHost(snackbar) },
         ) { padding ->
@@ -291,7 +307,6 @@ fun RebuyApp(
                         onOpen = onOpen, onComplete = viewModel::requestCompletion,
                         onCartAssist = { onCartAssist(it) },
                         onAutoBuy = { onAutoBuy(it) },
-                        batchRunning = batchState.running, onCartBatch = onCartBatch,
                     )
                     tab == 1 -> PurchaseLogList(state.purchaseLogs)
                     else -> SettingsScreen(state.settings, notificationsAllowed, busy, requestPermission, ::openNotificationSettings, viewModel::updateSettings, { onAutoBuy(null) })
@@ -368,7 +383,6 @@ private fun RoutineList(
     onDelete: (RoutineItem) -> Unit, onOpen: (String) -> Unit, onComplete: (RoutineItem) -> Unit,
     onCartAssist: (RoutineItem) -> Unit,
     onAutoBuy: (RoutineItem) -> Unit,
-    batchRunning: Boolean, onCartBatch: () -> Unit,
 ) {
     val all = source.filterNot { it.archived }
     val dueCount = all.count { it.enabled && it.nextPurchaseEpochDay <= today }
@@ -377,7 +391,7 @@ private fun RoutineList(
         .sortedWith(compareBy<RoutineItem> { !it.enabled }.thenBy { it.nextPurchaseEpochDay }.thenBy { it.title })
     LazyColumn(
         modifier = Modifier.fillMaxSize().testTag("routine-list"),
-        contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 100.dp),
+        contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 172.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         item {
@@ -385,19 +399,6 @@ private fun RoutineList(
                 Text("나의 구매 루틴", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
                 Text("필요한 날, 다시 담아요", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                 Text("자주 사는 상품을 한곳에서 챙기세요.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        }
-        item {
-            Button(
-                onClick = onCartBatch,
-                enabled = batchRunning || (!busy && all.any { it.enabled }),
-                modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp).testTag("cart-batch-open"),
-                shape = RoundedCornerShape(14.dp),
-            ) {
-                RebuyIcon(RebuyIconKind.Basket, Modifier.size(20.dp))
-                Spacer(Modifier.width(10.dp))
-                Text(if (batchRunning) "담기 진행 보기" else "예정 상품 담기 (${dueCount}개)", modifier = Modifier.weight(1f))
-                RebuyIcon(RebuyIconKind.ArrowRight, Modifier.size(18.dp))
             }
         }
 
