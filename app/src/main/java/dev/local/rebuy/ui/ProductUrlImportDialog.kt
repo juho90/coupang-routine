@@ -183,7 +183,7 @@ internal fun ProductUrlImportDialog(
                             OutlinedTextField(option, { option = it; error = null }, label = { Text("현재 선택 옵션") }, minLines = 1, maxLines = 3, modifier = Modifier.fillMaxWidth().testTag("product-url-import-option"))
                             if (suggestions.optionCandidates.size > 1) suggestions.optionCandidates.take(8).forEach { candidate -> TextButton(onClick = { option = candidate }) { Text(candidate) } }
                         }
-                        Text("다른 옵션은 해당 옵션의 링크를 카드에 추가해 선택할 수 있습니다.", style = MaterialTheme.typography.bodySmall)
+                        Text("옵션을 바꾸려면 상품 수정에서 원하는 옵션의 링크를 불러와 주세요.", style = MaterialTheme.typography.bodySmall)
                     }
                 }
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }

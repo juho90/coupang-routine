@@ -7,9 +7,6 @@ import dev.local.rebuy.data.PurchaseLogRepository
 import dev.local.rebuy.data.RoutineItem
 import dev.local.rebuy.data.RoutineRepository
 import dev.local.rebuy.domain.CompletionResult
-import dev.local.rebuy.domain.CoupangCartProductLink
-import dev.local.rebuy.domain.ProductVariant
-import dev.local.rebuy.domain.ProductVariantCodec
 import dev.local.rebuy.reminders.ReminderScheduler
 import dev.local.rebuy.settings.ReminderSettings
 import dev.local.rebuy.settings.SettingsRepository
@@ -73,33 +70,6 @@ class RoutineViewModel(
             maxTotalWon, productVariantsJson)
         onSaved()
         reconcileAfterChange("상품을 저장했습니다")
-    }
-
-    fun selectVariant(item: RoutineItem, variant: ProductVariant) = mutate {
-        repository.selectVariant(item.id, variant.productUrl)
-        scheduler.cancelNotification(item.id)
-        reconcileAfterChange("선택 옵션을 저장했습니다. 다음 담기에 이 옵션을 사용합니다")
-    }
-
-    fun addVariant(item: RoutineItem, variant: ProductVariant) = mutate {
-        val current = requireNotNull(repository.getItem(item.id)) { "등록된 상품을 찾을 수 없어요." }
-        require(!current.archived) { "보관된 상품은 수정할 수 없어요." }
-        val imported = ProductVariantCodec.validate(listOf(variant)).single()
-        val importedLink = CoupangCartProductLink.parse(imported.productUrl)
-        val currentLink = try {
-            CoupangCartProductLink.parse(current.productUrl)
-        } catch (invalid: IllegalArgumentException) {
-            throw IllegalArgumentException("상품 수정에서 현재 링크의 정보를 불러와 저장한 뒤 옵션을 추가해 주세요.", invalid)
-        }
-        require(currentLink.productId == importedLink.productId) { "같은 상품의 옵션 링크만 추가할 수 있습니다." }
-        val selected = current.purchaseOption?.let { ProductVariant(current.title, it, currentLink.canonicalUrl) }
-        val previous = (ProductVariantCodec.decode(current.productVariantsJson) + listOfNotNull(selected))
-            .distinctBy { it.productUrl }
-        val variants = previous.filterNot { it.productUrl == imported.productUrl } + imported
-        repository.saveItem(current.id, imported.title, imported.productUrl, current.quantity, current.intervalDays,
-            current.nextPurchaseEpochDay, imported.option, current.maxTotalWon, ProductVariantCodec.encode(variants))
-        scheduler.cancelNotification(current.id)
-        reconcileAfterChange("옵션을 추가하고 선택했습니다. 다음 담기에 이 옵션을 사용합니다")
     }
 
     fun setEnabled(item: RoutineItem, enabled: Boolean) = mutate {

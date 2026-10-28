@@ -50,8 +50,6 @@ import dev.local.rebuy.cart.CartBatchController
 import dev.local.rebuy.data.PurchaseRecord
 import dev.local.rebuy.data.RoutineItem
 import dev.local.rebuy.domain.CoupangUrl
-import dev.local.rebuy.domain.CoupangCartProductLink
-import dev.local.rebuy.domain.ProductVariant
 import dev.local.rebuy.domain.ProductVariantCodec
 import dev.local.rebuy.importproduct.ProductLinkImportController
 import dev.local.rebuy.importproduct.ProductLinkImportState
@@ -170,7 +168,6 @@ fun RebuyApp(
         var showEditor by rememberSaveable { mutableStateOf(false) }
         var editorId by rememberSaveable { mutableStateOf<String?>(null) }
         var deleteId by rememberSaveable { mutableStateOf<String?>(null) }
-        var optionImportId by rememberSaveable { mutableStateOf<String?>(null) }
         var showCartAssist by rememberSaveable { mutableStateOf(false) }
         var showCartBatch by rememberSaveable { mutableStateOf(false) }
         var cartAssistUrl by rememberSaveable { mutableStateOf("") }
@@ -295,8 +292,6 @@ fun RebuyApp(
                         onCartAssist = { onCartAssist(it) },
                         onAutoBuy = { onAutoBuy(it) },
                         batchRunning = batchState.running, onCartBatch = onCartBatch,
-                        onSelectVariant = viewModel::selectVariant,
-                        onAddVariant = { if (!busy) optionImportId = it.id },
                     )
                     tab == 1 -> PurchaseLogList(state.purchaseLogs)
                     else -> SettingsScreen(state.settings, notificationsAllowed, busy, requestPermission, ::openNotificationSettings, viewModel::updateSettings, { onAutoBuy(null) })
@@ -314,14 +309,6 @@ fun RebuyApp(
                 viewModel.saveItem(editorId, title, url, quantity, interval, date, option, limit, variants) { showEditor = false }
             },
         )
-        state.items.firstOrNull { it.id == optionImportId }?.let { item ->
-            ProductUrlImportDialog(
-                rawInitialUrl = item.productUrl,
-                onApply = { variant, _ -> viewModel.addVariant(item, variant); optionImportId = null },
-                onDismiss = { optionImportId = null },
-                onOpenChanged = { productImportOpen = it },
-            )
-        }
         if (showCartAssist) CartAssistDialog(
             initialUrl = cartAssistUrl,
             initialTitle = cartAssistTitle,
@@ -382,8 +369,6 @@ private fun RoutineList(
     onCartAssist: (RoutineItem) -> Unit,
     onAutoBuy: (RoutineItem) -> Unit,
     batchRunning: Boolean, onCartBatch: () -> Unit,
-    onSelectVariant: (RoutineItem, ProductVariant) -> Unit = { _, _ -> },
-    onAddVariant: (RoutineItem) -> Unit = {},
 ) {
     val all = source.filterNot { it.archived }
     val dueCount = all.count { it.enabled && it.nextPurchaseEpochDay <= today }
@@ -438,7 +423,7 @@ private fun RoutineList(
             EmptyState(if (all.isEmpty()) "첫 상품을 등록해 보세요" else "이 목록은 아직 비어 있어요", "쿠팡의 상품 또는 공유 URL을 붙여 넣고\n수량과 구매 주기를 정해 주세요.", Modifier.padding(top = 44.dp))
         }
         items(visible, key = { it.id }) { item ->
-            RoutineCard(item, today, busy, onEdit, onToggle, onDelete, onOpen, onComplete, onCartAssist, onAutoBuy, onSelectVariant, onAddVariant)
+            RoutineCard(item, today, busy, onEdit, onToggle, onDelete, onOpen, onComplete, onCartAssist, onAutoBuy)
         }
         if (visible.isNotEmpty()) item {
             Text("장바구니에서 주문한 뒤 구매 완료를 기록해 주세요. 결제는 직접 확인합니다.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 6.dp))
@@ -453,13 +438,9 @@ private fun RoutineCard(
     onOpen: (String) -> Unit, onComplete: (RoutineItem) -> Unit,
     onCartAssist: (RoutineItem) -> Unit,
     onAutoBuy: (RoutineItem) -> Unit,
-    onSelectVariant: (RoutineItem, ProductVariant) -> Unit = { _, _ -> },
-    onAddVariant: (RoutineItem) -> Unit = {},
 ) {
     val isDue = item.enabled && item.nextPurchaseEpochDay <= today
     var menu by remember { mutableStateOf(false) }
-    var variantMenu by remember { mutableStateOf(false) }
-    val variants = remember(item.productVariantsJson) { ProductVariantCodec.decode(item.productVariantsJson) }
     Card(
         modifier = Modifier.fillMaxWidth().testTag("routine-card"),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -502,53 +483,24 @@ private fun RoutineCard(
                     }
                 }
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.weight(1f)) {
-                    if (variants.isNotEmpty()) {
-                        OutlinedButton(
-                            onClick = { variantMenu = true }, enabled = !busy,
-                            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("product-variant-select"),
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                            shape = RoundedCornerShape(12.dp), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                        ) {
-                            Text("옵션 · ${item.purchaseOption.orEmpty()}", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                            Spacer(Modifier.width(6.dp))
-                            RebuyIcon(RebuyIconKind.More, Modifier.size(18.dp))
-                        }
-                        DropdownMenu(expanded = variantMenu && !busy, onDismissRequest = { variantMenu = false }) {
-                            variants.forEach { variant ->
-                                DropdownMenuItem(
-                                    text = { Text(variant.option) },
-                                    leadingIcon = { if (variant.productUrl == item.productUrl) RebuyIcon(RebuyIconKind.Check, Modifier.size(18.dp)) },
-                                    onClick = { variantMenu = false; onSelectVariant(item, variant) },
-                                )
-                            }
-                        }
-                    } else {
-                        Text("옵션 · ${item.purchaseOption.orEmpty()}", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Surface(
+                modifier = Modifier.fillMaxWidth().testTag("product-purchase-info"),
+                color = MaterialTheme.colorScheme.surfaceContainer,
+                shape = RoundedCornerShape(14.dp),
+            ) {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("옵션 · ${item.purchaseOption?.takeIf { it.isNotBlank() } ?: "링크에 지정된 옵션"}", style = MaterialTheme.typography.bodyMedium)
+                    Text("다음 구매 ${formatDate(item.nextPurchaseEpochDay)} · ${item.intervalDays}일마다", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    if (item.quantity != 1) Text("구매 수량 ${item.quantity}개", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    item.maxTotalWon?.let { maximum ->
+                        Text("금액 한도 ${NumberFormat.getIntegerInstance(Locale.KOREA).format(maximum)}원", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
+                    TextButton(
+                        onClick = { onComplete(item) }, enabled = item.enabled && !busy,
+                        contentPadding = PaddingValues(horizontal = 8.dp),
+                        modifier = Modifier.align(Alignment.End).testTag("complete-purchase"),
+                    ) { Text("구매 완료 기록", style = MaterialTheme.typography.labelMedium) }
                 }
-                IconButton(onClick = { onAddVariant(item) }, enabled = !busy, modifier = Modifier.testTag("product-variant-add").semantics { contentDescription = "옵션 링크 추가" }) {
-                    RebuyIcon(RebuyIconKind.Plus, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
-                }
-            }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                    Text("다음 구매", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(formatDate(item.nextPurchaseEpochDay), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
-                }
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                    Text("수량 · 주기", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text("${item.quantity}개 · ${item.intervalDays}일마다", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
-                }
-            }
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    item.maxTotalWon?.let { "금액 한도 ${NumberFormat.getIntegerInstance(Locale.KOREA).format(it)}원" }.orEmpty(),
-                    modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                TextButton(onClick = { onComplete(item) }, enabled = item.enabled && !busy, contentPadding = PaddingValues(horizontal = 4.dp), modifier = Modifier.testTag("complete-purchase")) { Text("구매 완료 기록", style = MaterialTheme.typography.labelMedium) }
             }
         }
     }
@@ -811,15 +763,7 @@ private fun ItemEditor(
     if (showUrlImport) ProductUrlImportDialog(
         rawInitialUrl = url,
         onApply = { variant, displayedPriceWon ->
-            val productId = CoupangCartProductLink.parse(variant.productUrl).productId
-            val current = runCatching {
-                ProductVariant(title.trim(), option.trim(), CoupangCartProductLink.parse(url).canonicalUrl)
-                    .also { ProductVariantCodec.encode(listOf(it)) }
-            }.getOrNull()
-            val previous = (ProductVariantCodec.decode(variantsJson) + listOfNotNull(current))
-                .filter { CoupangCartProductLink.parse(it.productUrl).productId == productId }
-                .distinctBy { it.productUrl }
-            variantsJson = ProductVariantCodec.encode(previous.filterNot { it.productUrl == variant.productUrl } + variant)
+            variantsJson = ProductVariantCodec.encode(listOf(variant))
             if (autoPriceSourceUrl != null &&
                 (autoPriceSourceUrl != variant.productUrl || title != variant.title || option != variant.option)) {
                 limit = ""
