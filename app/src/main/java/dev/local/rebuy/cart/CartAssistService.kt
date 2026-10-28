@@ -146,10 +146,11 @@ class CartAssistService : AccessibilityService() {
     private fun scan(root: AccessibilityNodeInfo, handles: MutableList<AccessibilityNodeInfo>): ScanResult {
         val snapshot = CartNodeTraversal.scan(
             root = root,
-            accepts = { it.packageName?.toString() == CartAssistController.COUPANG_PACKAGE },
+            accepts = { it.packageName?.toString() == CartAssistController.COUPANG_PACKAGE && it.isVisibleToUser },
             resourceId = { it.viewIdResourceName.orEmpty() },
             childCount = { it.childCount },
             childAt = { node, index -> node.getChild(index)?.also(handles::add) },
+            maxNodes = CartNodeTraversal.VISIBLE_SCAN_LIMIT,
         )
         return ScanResult(snapshot.entries.map { entry ->
             val node = entry.node

@@ -48,4 +48,18 @@ class CartNodeTraversalTest {
         assertEquals(1, scan.entries.size)
         assertEquals(599, lookups)
     }
+    @Test fun invisibleBranchesDoNotConsumeTheVisibleContentBudget() {
+        val root = Tree("root", listOf(
+            tree(14).copy(accepted = false),
+            Tree("detail", listOf(Tree("title"), Tree("price"))),
+            Tree("buttons"),
+        ))
+        var lookups = 0
+        val scan = CartNodeTraversal.scan(root, { it.accepted }, { it.id }, { it.children.size },
+            { node, index -> lookups++; node.children[index] }, maxNodes = CartNodeTraversal.VISIBLE_SCAN_LIMIT)
+        assertFalse(scan.truncated)
+        assertEquals(setOf("root", "detail", "title", "price", "buttons"), scan.entries.map { it.resourceId }.toSet())
+        assertEquals(5, lookups)
+    }
+
 }

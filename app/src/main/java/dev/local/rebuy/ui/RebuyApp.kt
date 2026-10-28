@@ -310,7 +310,7 @@ fun RebuyApp(
         state.items.firstOrNull { it.id == optionImportId }?.let { item ->
             ProductUrlImportDialog(
                 rawInitialUrl = item.productUrl,
-                onApply = { variant -> viewModel.addVariant(item, variant); optionImportId = null },
+                onApply = { variant, _ -> viewModel.addVariant(item, variant); optionImportId = null },
                 onDismiss = { optionImportId = null },
                 onOpenChanged = { productImportOpen = it },
             )
@@ -717,6 +717,7 @@ private fun ItemEditor(
     var showUrlImport by rememberSaveable(key) { mutableStateOf(false) }
     var showManualDetails by rememberSaveable(key) { mutableStateOf(false) }
     var limit by rememberSaveable(key) { mutableStateOf(item?.maxTotalWon?.toString().orEmpty()) }
+    var autoPriceSourceUrl by rememberSaveable(key) { mutableStateOf<String?>(null) }
     var quantity by rememberSaveable(key) { mutableStateOf((item?.quantity ?: 1).toString()) }
     var interval by rememberSaveable(key) { mutableStateOf((item?.intervalDays ?: 30).toString()) }
     var date by rememberSaveable(key) { mutableLongStateOf(item?.nextPurchaseEpochDay ?: today) }
@@ -724,7 +725,11 @@ private fun ItemEditor(
     var error by rememberSaveable(key) { mutableStateOf<String?>(null) }
     val inputEnabled = !busy
     fun changed() { error = null }
-    fun identityChanged() { variantsJson = "[]"; changed() }
+    fun identityChanged() {
+        variantsJson = "[]"
+        if (autoPriceSourceUrl != null) { limit = ""; autoPriceSourceUrl = null }
+        changed()
+    }
 
     LaunchedEffect(incomingImage?.id) { if (incomingImage != null) showManualDetails = true }
 
@@ -783,7 +788,7 @@ private fun ItemEditor(
                         if (draft.title.isNotBlank()) title = draft.title
                         draft.productUrl?.let { url = it }
                         if (draft.option.isNotBlank()) option = draft.option
-                        draft.displayedPriceWon?.let { limit = it.toString() }
+                        draft.displayedPriceWon?.let { limit = it.toString(); autoPriceSourceUrl = null }
                         if (previous != Triple(title, url, option)) identityChanged() else changed()
                     }
                 }
@@ -803,8 +808,8 @@ private fun ItemEditor(
                 }
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(limit, { limit = it.take(18); changed() }, label = { Text("금액 한도 (선택)") }, suffix = { Text("원") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, enabled = inputEnabled, shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth().testTag("purchase-limit"))
-                    Text("담기 전에는 화면의 상품가를 비교합니다. 배송비와 최종 결제 금액은 포함하지 않습니다. 비워 두면 담기 가격 검사를 생략합니다. 결제 전 시험에는 배송비 포함 한도가 필요합니다.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    OutlinedTextField(limit, { limit = it.take(18); autoPriceSourceUrl = null; changed() }, label = { Text("금액 한도 (선택)") }, suffix = { Text("원") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, enabled = inputEnabled, shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth().testTag("purchase-limit"))
+                    Text("링크의 상품 정보를 적용하면 비어 있는 한도에 읽은 상품가를 채웁니다. 이미 입력한 한도는 유지하며 직접 수정할 수 있습니다. 담기 전 비교는 배송비·최종 결제 금액을 포함하지 않습니다. 비워 두면 가격 검사를 생략합니다. 결제 전 시험에는 배송비 포함 한도가 필요합니다.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("item-editor-error")) }
             }
@@ -832,7 +837,7 @@ private fun ItemEditor(
     )
     if (showUrlImport) ProductUrlImportDialog(
         rawInitialUrl = url,
-        onApply = { variant ->
+        onApply = { variant, displayedPriceWon ->
             val productId = CoupangCartProductLink.parse(variant.productUrl).productId
             val current = runCatching {
                 ProductVariant(title.trim(), option.trim(), CoupangCartProductLink.parse(url).canonicalUrl)
@@ -842,9 +847,18 @@ private fun ItemEditor(
                 .filter { CoupangCartProductLink.parse(it.productUrl).productId == productId }
                 .distinctBy { it.productUrl }
             variantsJson = ProductVariantCodec.encode(previous.filterNot { it.productUrl == variant.productUrl } + variant)
+            if (autoPriceSourceUrl != null &&
+                (autoPriceSourceUrl != variant.productUrl || title != variant.title || option != variant.option)) {
+                limit = ""
+                autoPriceSourceUrl = null
+            }
             title = variant.title
             url = variant.productUrl
             option = variant.option
+            if (limit.isBlank() && displayedPriceWon != null && displayedPriceWon in 1L..100_000_000L) {
+                limit = displayedPriceWon.toString()
+                autoPriceSourceUrl = variant.productUrl
+            }
             changed()
             showUrlImport = false
         },

@@ -4,6 +4,7 @@ import java.util.ArrayDeque
 
 /** Breadth-first snapshot with a shared bound on native child lookups and retained nodes. */
 internal object CartNodeTraversal {
+    const val VISIBLE_SCAN_LIMIT = 2_000
     data class Entry<T>(
         val node: T,
         val resourceId: String,

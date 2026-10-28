@@ -358,8 +358,8 @@ object CartAssistController {
             lastActiveStage = prefs.getString("last_active_stage", null)?.let { enumValueOrNull<CartAssistStage>(it) },
             stopReason = prefs.getString("stop_reason", null)?.let { enumValueOrNull<CartAssistStopReason>(it) }
                 ?: if (stage == CartAssistStage.TIMED_OUT) CartAssistStopReason.TIMEOUT else CartAssistStopReason.NONE,
-            detailStructure = structure, scannedNodeCount = prefs.getInt("scanned_nodes", 0).coerceIn(0, 600),
-            resourceIdNodeCount = prefs.getInt("resource_id_nodes", 0).coerceIn(0, 600),
+            detailStructure = structure, scannedNodeCount = prefs.getInt("scanned_nodes", 0).coerceIn(0, CartNodeTraversal.VISIBLE_SCAN_LIMIT),
+            resourceIdNodeCount = prefs.getInt("resource_id_nodes", 0).coerceIn(0, CartNodeTraversal.VISIBLE_SCAN_LIMIT),
             scanTruncated = prefs.getBoolean("scan_truncated", false), clickClaimed = prefs.getBoolean("click_claimed", false),
             clickAccepted = if (prefs.contains("click_accepted")) prefs.getBoolean("click_accepted", false) else null,
             hasClickRecord = prefs.contains("click_claimed"),

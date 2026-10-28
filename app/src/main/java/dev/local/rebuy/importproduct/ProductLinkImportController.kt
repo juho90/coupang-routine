@@ -22,7 +22,7 @@ import kotlinx.coroutines.flow.asStateFlow
 sealed interface ProductLinkImportState {
     data object Idle : ProductLinkImportState
     data class Running(val message: String) : ProductLinkImportState
-    data class Finished(val productUrl: String, val suggestions: ProductTextSuggestions?, val message: String) : ProductLinkImportState
+    data class Finished(val productUrl: String, val suggestions: ProductTextSuggestions?, val message: String, val displayedPriceWon: Long? = null) : ProductLinkImportState
 }
 
 /** Explicit foreground reading only. No click, purchase, storage, or automatic restart exists here. */
@@ -41,6 +41,7 @@ object ProductLinkImportController {
         var lastScrollAt = 0L
         var candidateSince = 0L
         var candidate: ProductTextSuggestions? = null
+        var candidatePriceWon: Long? = null
     }
 
     fun isActive(): Boolean = current != null
@@ -57,7 +58,7 @@ object ProductLinkImportController {
         if (service == null) return reject(url, "접근성 권한은 켜져 있지만 도우미가 연결되지 않았습니다. 잠시 기다린 뒤 다시 시도해 주세요.")
         val session = Session(context.applicationContext, url)
         current = session
-        mutableState.value = ProductLinkImportState.Running("쿠팡 상품 화면에서 상품명과 현재 옵션을 읽고 있습니다. 담기·구매 버튼은 누르지 않습니다.")
+        mutableState.value = ProductLinkImportState.Running("쿠팡 상품 화면에서 상품명·현재 옵션·표시 상품가를 읽고 있습니다. 담기·구매 버튼은 누르지 않습니다.")
         return try {
             if (!ProductLauncher.openInCoupang(context, url, newTask = true)) {
                 finish(null, "쿠팡 상품 화면을 열지 못했습니다. 주소와 쿠팡 앱 설치를 확인해 주세요.")
@@ -116,9 +117,10 @@ object ProductLinkImportController {
             session.coupangSeen = true
             if (now - session.startedAt < 1_800) return
             val snapshot = CartNodeTraversal.scan(root,
-                accepts = { it.packageName?.toString() == CartAssistController.COUPANG_PACKAGE },
+                accepts = { it.packageName?.toString() == CartAssistController.COUPANG_PACKAGE && it.isVisibleToUser },
                 resourceId = { it.viewIdResourceName.orEmpty() }, childCount = { it.childCount },
                 childAt = { node, index -> node.getChild(index)?.also(handles::add) },
+                maxNodes = CartNodeTraversal.VISIBLE_SCAN_LIMIT,
             )
             val nodes = snapshot.entries.map { entry ->
                 val node = entry.node
@@ -132,19 +134,29 @@ object ProductLinkImportController {
                     childCount = entry.childCount,
                 )
             }
-            val suggestions = ProductLinkImportPolicy.suggest(nodes) ?: return
+            val suggestions = ProductLinkImportPolicy.suggest(nodes) ?: run {
+                session.candidatePriceWon = null
+                session.candidateSince = 0
+                return
+            }
+            val price = if (suggestions.titleCandidates.isNotEmpty() && suggestions.optionCandidates.isNotEmpty())
+                ProductLinkPricePolicy.read(nodes, snapshot.truncated) else null
             val hasTitle = suggestions.titleCandidates.isNotEmpty()
             if (hasTitle) {
                 val previous = session.candidate
-                if (previous == null || previous.titleCandidates != suggestions.titleCandidates || previous.optionCandidates != suggestions.optionCandidates) {
+                if (previous == null || session.candidateSince == 0L || previous.titleCandidates != suggestions.titleCandidates || previous.optionCandidates != suggestions.optionCandidates || session.candidatePriceWon != price) {
                     session.candidate = suggestions
+                    session.candidatePriceWon = price
                     session.candidateSince = now
-                } else if (suggestions.optionCandidates.isNotEmpty() && now - session.candidateSince >= 500) {
-                    finish(suggestions, "쿠팡 화면에서 읽은 후보입니다. 링크의 상품명과 옵션이 맞는지 확인한 뒤 적용해 주세요.", returnToApp = true)
+                } else if (suggestions.optionCandidates.isNotEmpty() && now - session.candidateSince >= (if (price == null) 1_500 else 500)) {
+                    finish(suggestions, "쿠팡 화면에서 읽은 후보입니다. 링크의 상품명·옵션·가격을 확인한 뒤 적용해 주세요.", returnToApp = true, displayedPriceWon = price)
                     return
                 }
                 // Let one more scan confirm the candidate before changing the viewport.
                 if (suggestions.optionCandidates.isNotEmpty()) return
+            } else {
+                session.candidatePriceWon = null
+                session.candidateSince = 0
             }
             if (session.scrollCount < 4 && now - session.lastScrollAt >= 1_200) {
                 session.lastScrollAt = now
@@ -167,12 +179,12 @@ object ProductLinkImportController {
         return false
     }
 
-    private fun finish(suggestions: ProductTextSuggestions?, message: String, returnToApp: Boolean = false) {
+    private fun finish(suggestions: ProductTextSuggestions?, message: String, returnToApp: Boolean = false, displayedPriceWon: Long? = null) {
         val session = current ?: return
         current = null
         handler.removeCallbacks(timeout)
         handler.removeCallbacks(poll)
-        mutableState.value = ProductLinkImportState.Finished(session.url, suggestions, message)
+        mutableState.value = ProductLinkImportState.Finished(session.url, suggestions, message, displayedPriceWon)
         if (returnToApp) runCatching {
             session.context.startActivity(Intent(session.context, MainActivity::class.java)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT))

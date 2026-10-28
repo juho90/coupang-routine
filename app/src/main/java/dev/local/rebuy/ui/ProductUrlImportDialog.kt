@@ -26,11 +26,13 @@ import dev.local.rebuy.domain.ProductVariant
 import dev.local.rebuy.domain.ProductVariantCodec
 import dev.local.rebuy.importproduct.ProductLinkImportController
 import dev.local.rebuy.importproduct.ProductLinkImportState
+import java.text.NumberFormat
+import java.util.Locale
 
 @Composable
 internal fun ProductUrlImportDialog(
     rawInitialUrl: String,
-    onApply: (ProductVariant) -> Unit,
+    onApply: (ProductVariant, Long?) -> Unit,
     onDismiss: () -> Unit,
     onOpenChanged: (Boolean) -> Unit = {},
     autoStart: Boolean = false,
@@ -54,6 +56,13 @@ internal fun ProductUrlImportDialog(
     val working = resolving != null || reading
     val result = (importState as? ProductLinkImportState.Finished)
         ?.takeIf { started && it.productUrl == requestUrl }
+    val displayedPrice = result?.displayedPriceWon?.takeIf { it in 1L..100_000_000L }
+    val priceToApply = displayedPrice?.takeIf {
+        val suggestions = result?.suggestions
+        suggestions != null &&
+            title.trim() == suggestions.titleCandidates.firstOrNull().orEmpty().trim() &&
+            option.trim() == suggestions.optionCandidates.firstOrNull().orEmpty().trim()
+    }
 
     DisposableEffect(Unit) {
         openChanged(true)
@@ -126,7 +135,7 @@ internal fun ProductUrlImportDialog(
         title = { Text("상품 정보 불러오기") },
         text = {
             Column(Modifier.heightIn(max = 540.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("쿠팡 앱에서 링크의 상품 화면을 읽어 상품명과 현재 선택 옵션을 제안합니다. 담기·주문·결제는 하지 않습니다.", style = MaterialTheme.typography.bodySmall)
+                Text("쿠팡 앱에서 링크의 상품 화면을 읽어 상품명·현재 선택 옵션·상품가를 제안합니다. 담기·주문·결제는 하지 않습니다.", style = MaterialTheme.typography.bodySmall)
                 OutlinedTextField(
                     value = url,
                     onValueChange = { url = it; started = false; requestUrl = null; populatedFor = null; error = null },
@@ -158,6 +167,13 @@ internal fun ProductUrlImportDialog(
                             Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                 Text(title.ifBlank { "상품명 확인 필요" }, style = MaterialTheme.typography.titleMedium)
                                 Text("선택 옵션 · ${option.ifBlank { "확인 필요" }}")
+                                if (displayedPrice != null) {
+                                    Text("읽은 상품가 · ${NumberFormat.getIntegerInstance(Locale.KOREA).format(displayedPrice)}원", modifier = Modifier.testTag("product-url-import-price"))
+                                    Text("읽은 가격을 확인한 뒤 적용해 주세요. 배송비는 포함하지 않습니다.", style = MaterialTheme.typography.bodySmall)
+                                    if (priceToApply == null) Text("상품명이나 옵션을 보완한 경우 읽은 가격을 자동 적용하지 않습니다. 금액 한도를 직접 확인해 주세요.", style = MaterialTheme.typography.bodySmall)
+                                } else {
+                                    Text("상품가를 확인하지 못했습니다. 금액 한도는 직접 입력해 주세요.", style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("product-url-import-price-missing"))
+                                }
                             }
                         }
                         if (!showCorrection) TextButton(onClick = { showCorrection = true }) { Text("읽은 정보 보완") }
@@ -181,7 +197,7 @@ internal fun ProductUrlImportDialog(
             if (!working && result?.suggestions != null) Button(enabled = title.isNotBlank() && option.isNotBlank(), onClick = {
                 try {
                     val variant = ProductVariantCodec.validate(listOf(ProductVariant(title.trim(), option.trim(), requireNotNull(requestUrl)))).single()
-                    onApply(variant)
+                    onApply(variant, priceToApply)
                 } catch (invalid: IllegalArgumentException) {
                     error = invalid.message ?: "상품명·옵션·상품 주소를 확인해 주세요."
                 }

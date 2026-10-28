@@ -30,6 +30,13 @@ class CartPricePolicyTest {
         assertTrue(result.message.contains("3,889원"))
     }
 
+    @Test fun inlineUnitPriceDoesNotReplaceTheProductPriceOrBypassOtherGuards() {
+        assertEquals(CartPricePolicy.Result.Allowed(3_990), CartPricePolicy.check(detail("3,990원 (100g당 499원)"), 3_990))
+        blocked(detail("3,990원 (100g당 499원)"), 3_989)
+        blocked(detail("3,990원 (100g당 499원) 5,000원"), 5_000)
+        blocked(detail("3,990원 (100g당 499원)", "쿠폰 적용가"), 3_990)
+    }
+
     @Test fun labelledSellingPriceAndUnicodeSpacingAreRecognized() {
         assertEquals(CartPricePolicy.Result.Allowed(26_980), CartPricePolicy.check(detail("판매가 : ２６，９８０ 원"), 26_980))
     }

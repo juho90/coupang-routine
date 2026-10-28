@@ -17,6 +17,7 @@ internal object CartPricePolicy {
     private val oldPrice = Regex("^(?:정가|정상가|원래가격|기존가)[:：]?$MONEY$")
     private val deliveryPrice = Regex("^(?:배송비|배송료)[:：]?(?:0원|$MONEY)$")
     private val unitPrice = Regex("^\\(?(?:[0-9]+(?:\\.[0-9]+)?(?:kg|mg|ml|g|l|개|팩|봉|병|세트))당$MONEY\\)?$", RegexOption.IGNORE_CASE)
+    private val unitPricePart = Regex("\\(?(?:[0-9]+(?:\\.[0-9]+)?)?(?:kg|mg|ml|g|l|ℓ|개|팩|봉|병|세트|매|장|그램|리터)당$MONEY\\)?", RegexOption.IGNORE_CASE)
     private val detachedNonPriceLabel = Regex("^(?:정가|정상가|원래가격|기존가|배송비|배송료|\\(?(?:[0-9]+(?:\\.[0-9]+)?)?(?:kg|mg|ml|g|l|개|팩|봉|병|세트|매|장|그램|리터)당\\)?)[:：]?$", RegexOption.IGNORE_CASE)
     private val conditionalPrice = Regex("와우|회원|쿠폰|카드|할부|첫구매|캐시|적립|할인적용|할인받")
     private val excludedSection = Regex("recommend|related|sponsor|advertis", RegexOption.IGNORE_CASE)
@@ -40,7 +41,8 @@ internal object CartPricePolicy {
         for (text in content) {
             if (!anyMoney.containsMatchIn(text)) continue
             if (oldPrice.matches(text) || deliveryPrice.matches(text) || unitPrice.matches(text)) continue
-            val match = sellingPrice.matchEntire(text)
+            val priceText = unitPricePart.replace(text, "")
+            val match = sellingPrice.matchEntire(priceText)
                 ?: return Result.Blocked("상품가와 다른 금액을 구분하지 못했습니다. 담지 않았습니다.")
             val amount = match.groupValues[1].removeSuffix("원").replace(",", "").toLongOrNull()
                 ?.takeIf { it in 1..100_000_000L }
