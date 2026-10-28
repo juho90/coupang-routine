@@ -30,7 +30,8 @@ class MainActivity : ComponentActivity() {
             @Suppress("UNCHECKED_CAST")
             override fun <T : ViewModel> create(modelClass: Class<T>): T {
                 require(modelClass.isAssignableFrom(RoutineViewModel::class.java))
-                return RoutineViewModel(container.repository, container.scheduler, container.settings) as T
+                return RoutineViewModel(container.repository, container.scheduler, container.settings,
+                    releaseCartRecord = { dev.local.rebuy.cart.CartAssistController.clearRecordedAddition(applicationContext, it) }) as T
             }
         }
     }

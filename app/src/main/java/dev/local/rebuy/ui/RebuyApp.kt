@@ -177,6 +177,7 @@ fun RebuyApp(
         var cartAssistTitle by rememberSaveable { mutableStateOf("") }
         var cartAssistOption by rememberSaveable { mutableStateOf("") }
         var cartAssistQuantity by rememberSaveable { mutableIntStateOf(1) }
+        var cartAssistLimit by rememberSaveable { mutableStateOf<Long?>(null) }
         var showAutoBuy by rememberSaveable { mutableStateOf(false) }
         var autoBuyItemId by rememberSaveable { mutableStateOf<String?>(null) }
         LaunchedEffect(incomingImage?.id, state.loading, state.loadError, busy, showCartBatch) {
@@ -208,6 +209,7 @@ fun RebuyApp(
                 cartAssistTitle = item?.title.orEmpty()
                 cartAssistOption = item?.purchaseOption.orEmpty()
                 cartAssistQuantity = item?.quantity ?: 1
+                cartAssistLimit = item?.maxTotalWon
                 showCartAssist = true
             }
         }
@@ -318,12 +320,14 @@ fun RebuyApp(
             initialTitle = cartAssistTitle,
             initialOption = cartAssistOption,
             quantity = cartAssistQuantity,
+            maxTotalWon = cartAssistLimit,
             incomingImage = incomingImage,
             onIncomingImageConsumed = onIncomingImageConsumed,
             onDismiss = { showCartAssist = false },
         )
         if (showCartBatch && !state.loading) CartBatchDialog(
             items = state.items,
+            today = today,
             onPreparingChanged = { batchPreparing = it },
             onDismiss = { showCartBatch = false },
         )
@@ -377,7 +381,7 @@ private fun RoutineList(
     val all = source.filterNot { it.archived }
     val dueCount = all.count { it.enabled && it.nextPurchaseEpochDay <= today }
     var filter by rememberSaveable { mutableIntStateOf(0) }
-    val visible = all.filter { when (filter) { 1 -> it.enabled; 2 -> !it.enabled; else -> true } }
+    val visible = all.filter { when (filter) { 1 -> it.enabled && it.nextPurchaseEpochDay <= today; 2 -> !it.enabled; else -> true } }
         .sortedWith(compareBy<RoutineItem> { !it.enabled }.thenBy { it.nextPurchaseEpochDay }.thenBy { it.title })
     LazyColumn(
         modifier = Modifier.fillMaxSize().testTag("routine-list"),
@@ -408,7 +412,7 @@ private fun RoutineList(
             ) {
                 RebuyIcon(RebuyIconKind.Basket, Modifier.size(20.dp))
                 Spacer(Modifier.width(10.dp))
-                Text(if (batchRunning) "담기 진행 보기" else "모두 장바구니에 담기", modifier = Modifier.weight(1f))
+                Text(if (batchRunning) "담기 진행 보기" else "예정 상품 담기 (${dueCount}개)", modifier = Modifier.weight(1f))
                 RebuyIcon(RebuyIconKind.ArrowRight, Modifier.size(18.dp))
             }
         }
@@ -426,7 +430,7 @@ private fun RoutineList(
         }
         item {
             Row(modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("전체 ${all.size}", "예정 ${all.count { it.enabled }}", "일시정지 ${all.count { !it.enabled }}").forEachIndexed { index, text ->
+                listOf("전체 ${all.size}", "예정 $dueCount", "일시정지 ${all.count { !it.enabled }}").forEachIndexed { index, text ->
                     FilterChip(selected = filter == index, onClick = { filter = index }, label = { Text(text) })
                 }
             }
@@ -548,7 +552,7 @@ private fun RoutineCard(
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    item.maxTotalWon?.let { "결제 전 확인 한도 ${NumberFormat.getIntegerInstance(Locale.KOREA).format(it)}원" }.orEmpty(),
+                    item.maxTotalWon?.let { "금액 한도 ${NumberFormat.getIntegerInstance(Locale.KOREA).format(it)}원" }.orEmpty(),
                     modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 TextButton(onClick = { onComplete(item) }, enabled = item.enabled && !busy, contentPadding = PaddingValues(horizontal = 4.dp), modifier = Modifier.testTag("complete-purchase")) { Text("구매 완료 기록", style = MaterialTheme.typography.labelMedium) }
@@ -799,8 +803,8 @@ private fun ItemEditor(
                 }
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(limit, { limit = it.take(18); changed() }, label = { Text("결제 전 확인 한도 (선택)") }, suffix = { Text("원") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, enabled = inputEnabled, shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth().testTag("purchase-limit"))
-                    Text("비워도 상품 카드를 저장할 수 있습니다. 결제 전 시험에는 배송비를 포함한 금액 한도가 필요합니다.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    OutlinedTextField(limit, { limit = it.take(18); changed() }, label = { Text("금액 한도 (선택)") }, suffix = { Text("원") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, enabled = inputEnabled, shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth().testTag("purchase-limit"))
+                    Text("담기 전에는 화면의 상품가를 비교합니다. 배송비와 최종 결제 금액은 포함하지 않습니다. 비워 두면 담기 가격 검사를 생략합니다. 결제 전 시험에는 배송비 포함 한도가 필요합니다.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("item-editor-error")) }
             }

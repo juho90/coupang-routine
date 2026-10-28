@@ -48,8 +48,18 @@ object CartBatchController {
             mutableState.value = CartBatchState(message = "다른 구매 도우미가 실행 중입니다. 실행을 마친 뒤 다시 시작해 주세요.")
             return false
         }
-        if (prepared.any { !CartAssistController.validRequest(CartAssistRequest(it.productUrl, it.title, it.option)) }) {
+        if (prepared.any { !CartAssistController.validRequest(CartAssistRequest(it.productUrl, it.title, it.option, maxTotalWon = it.maxTotalWon)) }) {
             mutableState.value = CartBatchState(message = "상품 주소·상품명·옵션을 확인해 주세요.")
+            return false
+        }
+        val hasRecordedAddition = try {
+            prepared.any { CartAdditionLedger(context).lookup(it.productUrl) != null }
+        } catch (_: Exception) {
+            mutableState.value = CartBatchState(message = "이전 담기 기록을 읽지 못해 시작하지 않았습니다.")
+            return false
+        }
+        if (hasRecordedAddition) {
+            mutableState.value = CartBatchState(message = "이전 담기 요청 기록이 있는 옵션이 포함되어 시작하지 않았습니다. 각 상품의 장바구니 담기 화면에서 결과를 확인한 뒤 기록을 해제해 주세요.")
             return false
         }
         cancelled = false
@@ -92,20 +102,23 @@ object CartBatchController {
         if (restored || isRunning() || job?.isActive == true) return
         this.context = context.applicationContext
         restored = true
+        var migrated = false
         val snapshot = runCatching {
             val raw = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY, null) ?: return
             require(raw.length <= 150_000)
-            decode(raw)
+            val json = JSONObject(raw)
+            migrated = json.getInt("version") == 1
+            decode(CartBatchSnapshotMigration.toCurrent(json))
         }.getOrNull() ?: return
         val restoredState = if (snapshot.running) CartBatchSequence.interrupted(snapshot) else snapshot
         mutableState.value = restoredState
-        if (snapshot.running) persist(restoredState)
+        if (snapshot.running || migrated) persist(restoredState)
     }
 
     private suspend fun execute(target: CartBatchTarget): CartBatchAttemptResult {
         if (cancelled) return CartBatchAttemptResult(false, "사용자가 중지했습니다.")
         return try {
-            val started = CartAssistController.start(requireNotNull(context), CartAssistRequest(target.productUrl, target.title, target.option))
+            val started = CartAssistController.start(requireNotNull(context), CartAssistRequest(target.productUrl, target.title, target.option, maxTotalWon = target.maxTotalWon))
             ownsChild = started
             if (!started) {
                 CartBatchAttemptResult(false, (CartAssistController.state.value as? CartAssistState.Finished)?.message ?: "상품 도우미를 시작하지 못했습니다.")
@@ -134,28 +147,27 @@ object CartBatchController {
     }.getOrDefault(false)
 
     private fun encode(snapshot: CartBatchState): String = JSONObject().apply {
-        put("version", 1); put("running", snapshot.running); put("message", snapshot.message); put("interrupted", snapshot.interrupted)
+        put("version", 2); put("running", snapshot.running); put("message", snapshot.message); put("interrupted", snapshot.interrupted)
         put("entries", JSONArray().apply {
             snapshot.entries.forEach { entry ->
                 put(JSONObject().apply {
                     put("itemId", entry.target.itemId); put("title", entry.target.title)
                     put("url", entry.target.productUrl); put("option", entry.target.option)
-                    put("quantity", entry.target.quantity); put("status", entry.status.name); put("message", entry.message)
+                    put("quantity", entry.target.quantity); put("maxTotalWon", entry.target.maxTotalWon ?: JSONObject.NULL); put("status", entry.status.name); put("message", entry.message)
                 })
             }
         })
     }.toString()
 
-    private fun decode(raw: String): CartBatchState {
-        val json = JSONObject(raw)
-        require(json.getInt("version") == 1)
+    private fun decode(json: JSONObject): CartBatchState {
         val entries = json.getJSONArray("entries")
         require(entries.length() <= CartBatchValidation.MAX_TARGETS)
         return CartBatchState(
             entries = (0 until entries.length()).map { index ->
                 val entry = entries.getJSONObject(index)
                 CartBatchEntry(
-                    CartBatchTarget(entry.getString("itemId"), entry.getString("title"), entry.getString("url"), entry.getString("option"), entry.getInt("quantity")),
+                    CartBatchTarget(entry.getString("itemId"), entry.getString("title"), entry.getString("url"), entry.getString("option"), entry.getInt("quantity"),
+                        if (entry.isNull("maxTotalWon")) null else entry.getLong("maxTotalWon")),
                     CartBatchEntryStatus.valueOf(entry.getString("status")), entry.getString("message"),
                 )
             },

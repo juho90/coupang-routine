@@ -52,6 +52,7 @@ private fun CartAssistStage.displayName(): String = when (this) {
     CartAssistStage.WAITING_CART_BUTTON -> "담기 버튼 구조 확인 대기"
     CartAssistStage.IDENTITY_STABILIZING -> "상품·옵션 일치 유지 확인"
     CartAssistStage.SCROLLING_DETAIL -> "상품 상세 스크롤"
+    CartAssistStage.CHECKING_PRICE -> "담기 전 상품가 한도 확인"
     CartAssistStage.VERIFIED -> "담기 전 점검 완료"
     CartAssistStage.CLICK_CLAIMED -> "담기 요청 선점"
     CartAssistStage.WAITING_CONFIRMATION -> "쿠팡의 담기 완료 안내 대기"

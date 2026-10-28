@@ -4,12 +4,15 @@ import android.content.Intent
 import android.provider.Settings
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -29,22 +32,29 @@ import dev.local.rebuy.cart.CartAssistState
 import dev.local.rebuy.cart.CartBatchController
 import dev.local.rebuy.cart.CartBatchEntryStatus
 import dev.local.rebuy.cart.CartBatchTarget
+import dev.local.rebuy.cart.CartBatchScope
+import dev.local.rebuy.cart.CartBatchSelection
 import dev.local.rebuy.data.RoutineItem
 import dev.local.rebuy.domain.CoupangCartProductLink
+import java.time.LocalDate
+import java.text.NumberFormat
+import java.util.Locale
 
 /** Resolve every URL while visible; only an explicit start hands a frozen list to the runner. */
 @Composable
-internal fun CartBatchDialog(items: List<RoutineItem>, onPreparingChanged: (Boolean) -> Unit, onDismiss: () -> Unit) {
+internal fun CartBatchDialog(items: List<RoutineItem>, today: Long, onPreparingChanged: (Boolean) -> Unit, onDismiss: () -> Unit) {
     val context = LocalContext.current
     val batch by CartBatchController.state.collectAsStateWithLifecycle()
-    val snapshot = remember { items.toList() }
-    val targets = remember(snapshot) {
-        snapshot.filter { it.enabled && !it.archived }.map {
-            CartBatchTarget(it.id, it.title, it.productUrl, it.purchaseOption.orEmpty(), it.quantity)
+    var scope by rememberSaveable { mutableStateOf(CartBatchScope.DUE) }
+    val targets = remember(items, today, scope) {
+        CartBatchSelection.select(items, today, scope).map {
+            CartBatchTarget(it.id, it.title, it.productUrl, it.purchaseOption.orEmpty(), it.quantity, it.maxTotalWon)
         }
     }
-    val pausedCount = snapshot.count { !it.archived && !it.enabled }
-    val archivedCount = snapshot.count { it.archived }
+    val dueCount = CartBatchSelection.select(items, today, CartBatchScope.DUE).size
+    val activeCount = CartBatchSelection.select(items, today, CartBatchScope.ALL_ACTIVE).size
+    val pausedCount = items.count { !it.archived && !it.enabled }
+    val archivedCount = items.count { it.archived }
     val invalid = targets.filter {
         it.quantity != 1 || CartAssistPolicy.normalize(it.title).length < 4 ||
             it.title.length > 250 || CartAssistPolicy.normalizeOption(it.option).length < 2 ||
@@ -76,11 +86,18 @@ internal fun CartBatchDialog(items: List<RoutineItem>, onPreparingChanged: (Bool
             stopPreparation("화면이 바뀌어 상품 주소 확인을 중단했습니다. 목록을 확인한 뒤 다시 시작해 주세요.")
         }
     }
+    LaunchedEffect(items, today, scope) {
+        if (pending != null) stopPreparation("구매 일정이나 등록 정보가 바뀌어 확인을 중단했습니다. 대상 목록을 확인하고 다시 시작해 주세요.")
+    }
     LaunchedEffect(preparing) { preparingCallback(preparing) }
     DisposableEffect(Unit) { onDispose { preparingCallback(false) } }
     LaunchedEffect(sequence, resolvingIndex, preparing) {
         val queue = pending ?: return@LaunchedEffect
         if (resolvingIndex == queue.size) {
+            if (LocalDate.now().toEpochDay() != today || queue != targets) {
+                stopPreparation("날짜나 대상 목록이 바뀌었습니다. 현재 구매 예정 상품을 확인하고 다시 시작해 주세요.")
+                return@LaunchedEffect
+            }
             val ready = resolved.toList()
             stopPreparation()
             hasStarted = true
@@ -100,7 +117,8 @@ internal fun CartBatchDialog(items: List<RoutineItem>, onPreparingChanged: (Bool
     fun begin() {
         if (preparing || batch.running) return
         error = when {
-            targets.isEmpty() -> "담을 상품이 없습니다. 상품을 등록하고 일시정지를 해제해 주세요."
+            LocalDate.now().toEpochDay() != today -> "날짜가 바뀌었습니다. 현재 구매 예정 상품을 확인하고 다시 시작해 주세요."
+            targets.isEmpty() -> if (scope == CartBatchScope.DUE) "오늘까지 구매 예정인 상품이 없습니다. 전체 활성 상품을 보려면 대상 범위를 바꿔 주세요." else "담을 활성 상품이 없습니다. 상품을 등록하고 일시정지를 해제해 주세요."
             targets.size > 20 -> "한 번에 최대 20개 상품을 담을 수 있습니다."
             invalid.isNotEmpty() -> "상품 수정에서 구매 수량을 1개로 맞추고 링크로 상품 정보를 불러와 주세요."
             CartAssistController.state.value is CartAssistState.Running || AutoBuyController.isActive() ->
@@ -120,12 +138,33 @@ internal fun CartBatchDialog(items: List<RoutineItem>, onPreparingChanged: (Bool
 
     AlertDialog(
         onDismissRequest = ::dismiss,
-        title = { Text("등록 상품 담기") },
+        title = { Text(if (scope == CartBatchScope.DUE) "구매 예정 상품 담기" else "전체 활성 상품 담기") },
         text = {
             Column(Modifier.heightIn(max = 500.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("등록한 활성 상품을 선택한 옵션으로 순서대로 담습니다. 다음 구매일과 관계없이 아래 상품 전체가 대상입니다.")
-                Text("한 번에 최대 20개 상품, 상품별 구매 수량 1개를 지원합니다. 담기 버튼을 상품마다 한 번씩 누르므로 기존 장바구니 수량은 늘어날 수 있습니다. 실제 수량은 쿠팡에서 확인해 주세요.", style = MaterialTheme.typography.bodySmall)
-                Text("상품 링크를 모두 확인한 뒤 시작합니다. 한 상품이 실패하면 나머지는 멈춥니다. 금액 한도 확인·주문·결제·구매 완료 기록은 하지 않습니다.", style = MaterialTheme.typography.bodySmall)
+                if (!batch.running && !hasStarted) {
+                    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(
+                            selected = scope == CartBatchScope.DUE,
+                            onClick = { scope = CartBatchScope.DUE; error = null },
+                            enabled = !preparing,
+                            label = { Text("구매 예정 $dueCount") },
+                            modifier = Modifier.testTag("cart-batch-scope-due"),
+                        )
+                        FilterChip(
+                            selected = scope == CartBatchScope.ALL_ACTIVE,
+                            onClick = { scope = CartBatchScope.ALL_ACTIVE; error = null },
+                            enabled = !preparing,
+                            label = { Text("전체 활성 $activeCount") },
+                            modifier = Modifier.testTag("cart-batch-scope-all"),
+                        )
+                    }
+                }
+                Text(if (scope == CartBatchScope.DUE) "다음 구매일이 오늘이거나 지난 활성 상품만 선택한 옵션으로 담습니다." else "다음 구매일과 관계없이 활성 상품 전체를 선택한 옵션으로 담습니다.")
+                if (scope == CartBatchScope.DUE && !batch.running && !hasStarted && targets.isEmpty()) {
+                    Text("오늘까지 구매 예정인 상품이 없습니다. 미리 담으려면 ‘전체 활성’을 선택해 주세요.", style = MaterialTheme.typography.bodySmall)
+                }
+                Text("한 번에 최대 20개 상품을 각각 1개씩 담습니다. 같은 옵션의 앱 담기 기록이 있으면 재추가를 막고 멈춥니다. 직접 담은 상품은 알 수 없으므로 실제 장바구니도 확인해 주세요.", style = MaterialTheme.typography.bodySmall)
+                Text("한도가 있는 상품은 담기 전 화면의 상품가를 비교합니다. 초과·가격 불명확·담기 실패 시 나머지는 멈춥니다. 배송비·최종 결제 금액은 별도이며 주문·결제·구매 완료 기록은 실행하지 않습니다.", style = MaterialTheme.typography.bodySmall)
                 if (pausedCount > 0 || archivedCount > 0) Text("대상에서 제외: 일시정지 ${pausedCount}개 · 보관 ${archivedCount}개", style = MaterialTheme.typography.bodySmall)
                 if (preparing) {
                     LinearProgressIndicator(Modifier.fillMaxWidth())
@@ -173,6 +212,9 @@ internal fun CartBatchDialog(items: List<RoutineItem>, onPreparingChanged: (Bool
                         Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                             Text(target.title, fontWeight = FontWeight.SemiBold)
                             Text("선택 옵션 ${target.option.ifBlank { "확인 필요" }} · 구매 수량 ${target.quantity}개", style = MaterialTheme.typography.bodySmall)
+                            target.maxTotalWon?.let { maximum ->
+                                Text("등록 한도 ${NumberFormat.getIntegerInstance(Locale.KOREA).format(maximum)}원", style = MaterialTheme.typography.bodySmall)
+                            }
                             if (target in invalid) Text("등록 정보를 수정해야 합니다.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                         }
                     }

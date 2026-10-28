@@ -45,6 +45,7 @@ class RoutineViewModel(
     private val repository: RoutineRepository,
     private val scheduler: ReminderScheduler,
     private val settingsRepository: SettingsRepository,
+    private val releaseCartRecord: (String) -> Boolean,
 ) : ViewModel() {
     private val messages = Channel<String>(Channel.BUFFERED)
     val events = messages.receiveAsFlow()
@@ -135,7 +136,9 @@ class RoutineViewModel(
     fun dismissCompletion() { _completionPrompt.value = null }
 
     fun completePurchase(prompt: CompletionPrompt) = mutate {
+        val completedItem = repository.getItem(prompt.itemId)
         val result = repository.completePurchase(prompt.itemId, prompt.expectedCycleId)
+        val cartRecordReleased = result != CompletionResult.Completed || completedItem?.let { releaseCartRecord(it.productUrl) } == true
         _completionPrompt.value = null
         // A replayed dialog can belong to an older cycle. Its notification may already have
         // been replaced by the current cycle, so only a successful completion may cancel it.
@@ -146,7 +149,7 @@ class RoutineViewModel(
             CompletionResult.Stale -> "상품의 일정이 변경되었습니다. 현재 구매 목록을 확인해 주세요"
             CompletionResult.NotFound -> "상품을 찾을 수 없습니다"
         }
-        reconcileAfterChange(message)
+        reconcileAfterChange(message + if (cartRecordReleased) "" else ". 담기 기록 해제는 실패해 장바구니 확인 후 직접 해제해야 합니다")
     }
 
     fun updateSettings(enabled: Boolean, hour: Int, minute: Int) = mutate {

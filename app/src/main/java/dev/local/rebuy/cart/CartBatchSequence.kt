@@ -3,7 +3,7 @@ package dev.local.rebuy.cart
 import dev.local.rebuy.domain.CoupangCartProductLink
 import kotlinx.coroutines.delay
 
-data class CartBatchTarget(val itemId: String, val title: String, val productUrl: String, val option: String, val quantity: Int = 1)
+data class CartBatchTarget(val itemId: String, val title: String, val productUrl: String, val option: String, val quantity: Int = 1, val maxTotalWon: Long? = null)
 enum class CartBatchEntryStatus { PENDING, RUNNING, ADDED, FAILED, NOT_RUN }
 data class CartBatchEntry(val target: CartBatchTarget, val status: CartBatchEntryStatus = CartBatchEntryStatus.PENDING, val message: String = "")
 data class CartBatchState(
@@ -23,10 +23,11 @@ internal object CartBatchValidation {
         require(targets.size in 1..MAX_TARGETS) { "한 번에 등록 상품 1~20개를 담을 수 있습니다." }
         val prepared = targets.map { item ->
             require(item.itemId.isNotBlank() && item.itemId.length <= 100) { "등록 상품 식별자를 확인해 주세요." }
+            require(item.maxTotalWon == null || item.maxTotalWon in 1L..100_000_000L) { "등록한 상품 금액 한도를 확인해 주세요." }
             require(item.quantity == 1) { "여러 상품 담기도 상품별 구매 수량 1개만 지원합니다." }
             require(item.title.length <= 250 && CartAssistPolicy.normalize(item.title).length >= 4) { "상품명을 확인해 주세요." }
             require(item.option.length <= 120 && CartAssistPolicy.normalizeOption(item.option).length >= 2) { "구매 옵션을 확인해 주세요." }
-            val product = CoupangCartProductLink.parse(item.productUrl)
+            val product = CoupangCartProductLink.parseExactOption(item.productUrl)
             item.copy(title = item.title.trim(), option = item.option.trim(), productUrl = product.canonicalUrl)
         }
         require(prepared.distinctBy { it.itemId }.size == prepared.size) { "동일한 등록 상품이 중복 선택됐습니다." }

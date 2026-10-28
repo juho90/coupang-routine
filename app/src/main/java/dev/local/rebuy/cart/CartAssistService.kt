@@ -107,6 +107,7 @@ class CartAssistService : AccessibilityService() {
                     CartAssistController.finishVerified(current)
                     return
                 }
+                if (!CartAssistController.checkPrice(current, nodes, scan.truncated)) return
                 if (!CartAssistController.claimClick(current)) return
                 // A second independent mode gate protects the external effect even if claimClick
                 // is changed incorrectly later. Verification never reaches ACTION_CLICK.
@@ -130,7 +131,7 @@ class CartAssistService : AccessibilityService() {
                     CartAssistController.reportStage(current, CartAssistStage.SCROLLING_DETAIL, inspection)
                 }
             }
-        } catch (_: RuntimeException) {
+        } catch (_: Exception) {
             CartAssistController.finish(if (current.clickClaimed)
                 "쿠팡 화면을 확인하는 중 멈췄습니다. 장바구니에서 결과를 확인해 주세요."
                 else "쿠팡 화면을 읽는 중 멈췄습니다. 담기 버튼은 누르지 않았습니다.", false)

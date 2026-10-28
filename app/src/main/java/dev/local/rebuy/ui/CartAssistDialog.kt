@@ -44,6 +44,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import dev.local.rebuy.cart.CartAdditionLedger
 import dev.local.rebuy.cart.CartAssistController
 import dev.local.rebuy.cart.CartAssistPolicy
 import dev.local.rebuy.cart.CartAssistRequest
@@ -60,6 +61,7 @@ internal fun CartAssistDialog(
     initialUrl: String,
     initialTitle: String,
     quantity: Int,
+    maxTotalWon: Long?,
     initialOption: String = "",
     incomingImage: IncomingProductImage? = null,
     onIncomingImageConsumed: () -> Unit = {},
@@ -78,12 +80,26 @@ internal fun CartAssistDialog(
     }
     var serviceEnabled by remember { mutableStateOf(CartAssistController.isEnabled(context)) }
     var error by rememberSaveable { mutableStateOf<String?>(null) }
+    var receipt by remember { mutableStateOf<CartAdditionLedger.Record?>(null) }
+    var receiptReadFailed by remember { mutableStateOf(false) }
+    var showReceiptReset by rememberSaveable { mutableStateOf(false) }
     var ownsAttempt by rememberSaveable { mutableStateOf(false) }
     var resolution by remember { mutableStateOf<CartShareResolution?>(null) }
     var resolutionSequence by remember { mutableLongStateOf(0L) }
     var resolutionWasPending by rememberSaveable { mutableStateOf(false) }
     val running = ownsAttempt && assistState is CartAssistState.Running
     val busy = running || resolution != null
+
+    fun refreshReceipt() {
+        receiptReadFailed = false
+        receipt = if (runCatching { CoupangCartProductLink.parseExactOption(url) }.isSuccess)
+            runCatching { CartAdditionLedger(context).lookup(url) }.getOrElse {
+                receiptReadFailed = true
+                error = "이전 담기 기록을 읽지 못했습니다. 담기는 시작 시 다시 검사하며 기록을 읽지 못하면 중단합니다."
+                null
+            } else null
+    }
+    LaunchedEffect(url, assistState) { refreshReceipt() }
 
     LaunchedEffect(Unit) {
         CartAssistController.restoreDiagnostics(context)
@@ -98,6 +114,7 @@ internal fun CartAssistDialog(
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 serviceEnabled = CartAssistController.isEnabled(context)
+                refreshReceipt()
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -130,7 +147,7 @@ internal fun CartAssistDialog(
             return
         }
         url = product.canonicalUrl
-        ownsAttempt = CartAssistController.start(context, CartAssistRequest(product.canonicalUrl, requestTitle, requestOption))
+        ownsAttempt = CartAssistController.start(context, CartAssistRequest(product.canonicalUrl, requestTitle, requestOption, maxTotalWon = maxTotalWon))
         serviceEnabled = CartAssistController.isEnabled(context)
         if (!ownsAttempt) error = (CartAssistController.state.value as? CartAssistState.Finished)?.message
             ?: "구매 도우미를 시작하지 못했습니다. 잠시 뒤 다시 시도해 주세요."
@@ -184,8 +201,13 @@ internal fun CartAssistDialog(
                         Text(url.ifBlank { "상품 링크 필요" }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
-                Text("상품의 담기 버튼을 한 번 누릅니다. 기존 장바구니 수량은 늘어날 수 있으니 실제 수량은 쿠팡에서 확인해 주세요.", style = MaterialTheme.typography.bodySmall)
-                Text("현재는 구매 수량 1개를 지원합니다. 금액 한도 확인·주문·결제·구매 완료 기록은 하지 않습니다.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("앱의 이전 담기 요청 기록이 있으면 같은 옵션을 다시 담지 않습니다. 쿠팡에서 직접 담은 상품은 확인할 수 없으니 장바구니를 함께 확인해 주세요.", style = MaterialTheme.typography.bodySmall)
+                Text("수량 1개를 담습니다. 등록 한도가 있으면 화면의 상품가를 비교하고, 초과하거나 가격이 불명확하면 담지 않습니다. 배송비·최종 결제 금액은 검증하지 않으며 주문·결제·구매 완료 기록을 실행하지 않습니다.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                maxTotalWon?.let { Text("상품가 비교 한도 ${java.text.NumberFormat.getIntegerInstance(java.util.Locale.KOREA).format(it)}원", style = MaterialTheme.typography.labelLarge) }
+                receipt?.let { previous ->
+                    Text(if (previous.status == CartAdditionLedger.Status.CONFIRMED) "이 옵션의 담기 완료 기록이 있어 재추가를 막고 있습니다." else "이 옵션의 이전 담기 요청 결과를 확인해야 합니다. 재추가를 막고 있습니다.", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodySmall)
+                }
+                if (receipt != null || receiptReadFailed) TextButton(onClick = { error = null; showReceiptReset = true }, enabled = !busy, modifier = Modifier.testTag("cart-record-reset")) { Text("장바구니 확인 후 기록 해제") }
                 if (quantity != 1) Text(
                     "상품 수정에서 구매 수량을 1개로 바꿔 주세요.",
                     color = MaterialTheme.colorScheme.error,
@@ -306,18 +328,39 @@ internal fun CartAssistDialog(
                 TextButton(onClick = ::cancelAttempt) { Text("실행 중단") }
             } else {
                 Button(
-                    enabled = quantity == 1 && serviceEnabled,
+                    enabled = quantity == 1 && serviceEnabled && receipt == null && !receiptReadFailed,
                     onClick = ::beginAttempt,
                     modifier = Modifier.fillMaxWidth().testTag("cart-add-one"),
                 ) {
-                    val completed = (assistState as? CartAssistState.Finished)
-                        ?.takeIf { ownsAttempt && it.success }
-                    Text(if (completed != null) "한 번 더 담기" else "장바구니에 담기")
+                    Text(if (receipt != null || receiptReadFailed) "이전 담기 기록 확인 필요" else "장바구니에 담기")
                 }
             }
         },
         dismissButton = { TextButton(onClick = ::dismiss) { Text("닫기") } },
     )
+    if (showReceiptReset) AlertDialog(
+        onDismissRequest = { showReceiptReset = false },
+        title = { Text("담기 기록을 해제할까요?") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("쿠팡 장바구니에서 이 상품을 삭제했거나 주문한 것을 직접 확인한 경우에만 해제해 주세요. 기록만 지우며 쿠팡 장바구니는 변경하지 않습니다. 상품이 남아 있으면 다시 담을 때 수량이 늘어날 수 있습니다.")
+                error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                if (CartAssistController.clearRecordedAddition(context, url)) {
+                    receipt = null
+                    receiptReadFailed = false
+                    ownsAttempt = false
+                    error = null
+                    showReceiptReset = false
+                } else error = "기록을 해제하지 못했습니다. 실행 중인 도우미를 닫고 다시 시도해 주세요."
+            }, enabled = !busy, modifier = Modifier.testTag("cart-record-clear-confirm")) { Text("확인했어요 · 기록 해제") }
+        },
+        dismissButton = { TextButton(onClick = { showReceiptReset = false }) { Text("취소") } },
+    )
+
 }
 
 internal data class CartShareResolution(val id: Long, val url: String, val title: String, val option: String)

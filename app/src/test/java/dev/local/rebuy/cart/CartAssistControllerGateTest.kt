@@ -16,9 +16,10 @@ class CartAssistControllerGateTest {
     private fun request(url: String = "https://www.coupang.com/vp/products/123456?itemId=333&vendorItemId=444") =
         CartAssistRequest(url, "동원 용기죽 4종 기획세트", "285g × 1세트")
 
-    @Test fun nativeCartSessionRequiresResolvedProductUrlButAllowsMissingOptionIds() {
+    @Test fun nativeCartSessionRequiresExactOptionIdsAndReadOnlyCanInspectBasicProduct() {
         assertTrue(CartAssistController.validRequest(request()))
-        assertTrue(CartAssistController.validRequest(request("https://www.coupang.com/vp/products/123456")))
+        assertFalse(CartAssistController.validRequest(request("https://www.coupang.com/vp/products/123456")))
+        assertTrue(CartAssistController.validRequest(request("https://www.coupang.com/vp/products/123456").copy(verifyOnly = true)))
         assertFalse(CartAssistController.validRequest(request("https://link.coupang.com/a/example")))
     }
 
@@ -70,4 +71,50 @@ class CartAssistControllerGateTest {
         assertFalse(diskFailure.claimBeforeEffect { false })
         assertFalse(diskFailure.claimBeforeEffect { throw AssertionError("must never retry a claim") })
     }
+    @Test fun cappedSessionCannotClaimOrActBeforePriceVerificationAndInvalidCapsNeverDisableGuard() {
+        val session = CartAssistController.Session("capped", request().copy(maxTotalWon = 100), startedAt = 0)
+        var effects = 0
+        assertFalse(session.claimBeforeEffect { effects++; true })
+        session.clickClaimed = true
+        assertFalse(session.performClaimedAction { effects++; true })
+        assertEquals(0, effects)
+        assertFalse(CartAssistController.validRequest(request().copy(maxTotalWon = 0)))
+        assertFalse(CartAssistController.validRequest(request().copy(maxTotalWon = 100_000_001)))
+        assertTrue(CartAssistController.validRequest(request().copy(maxTotalWon = 100)))
+    }
+
+    @Test fun recordedAdditionBlocksSingleAndWholeBatchBeforeAnyNativeLaunch() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val ledger = CartAdditionLedger(context)
+        val recorded = request()
+        assertTrue(ledger.clear(recorded.productUrl))
+        assertTrue(ledger.claim(recorded.productUrl, "previous-request"))
+        assertFalse(CartAssistController.start(context, recorded))
+        assertNull(CartAssistController.currentSession())
+        assertNull(Shadows.shadowOf(context as Application).nextStartedActivity)
+        val earlier = CartBatchTarget("earlier", "다른 등록 상품 이름", "https://www.coupang.com/vp/products/12?itemId=21&vendorItemId=22", "600ml, 1개", maxTotalWon = 5000)
+        val duplicate = CartBatchTarget("recorded", recorded.expectedTitle, recorded.productUrl, recorded.expectedOption)
+        assertFalse(CartBatchController.start(context, listOf(earlier, duplicate)))
+        assertFalse(CartBatchController.isRunning())
+        assertTrue(CartBatchController.state.value.message.contains("기록"))
+        assertNull(Shadows.shadowOf(context as Application).nextStartedActivity)
+        assertNull(ledger.lookup(earlier.productUrl))
+        assertTrue(ledger.clear(recorded.productUrl))
+    }
+
+    @Test fun malformedRecordedAdditionStopsWithoutThrowingOrLaunching() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val ledger = CartAdditionLedger(context)
+        val request = request()
+        assertTrue(ledger.clear(request.productUrl))
+        assertTrue(ledger.claim(request.productUrl, "previous-request"))
+        val prefs = context.getSharedPreferences("cart_addition_ledger_v1", Context.MODE_PRIVATE)
+        val key = prefs.all.keys.single()
+        assertTrue(prefs.edit().putString(key, "broken-json").commit())
+        assertFalse(CartAssistController.start(context, request))
+        assertNull(CartAssistController.currentSession())
+        assertNull(Shadows.shadowOf(context as Application).nextStartedActivity)
+        assertTrue(ledger.clear(request.productUrl))
+    }
+
 }

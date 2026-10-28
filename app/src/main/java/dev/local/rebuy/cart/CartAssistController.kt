@@ -22,12 +22,13 @@ data class CartAssistRequest(
     val expectedTitle: String,
     val expectedOption: String,
     val verifyOnly: Boolean = false,
+    val maxTotalWon: Long? = null,
 )
 
 enum class CartAssistStage {
     IDLE, OPENING_PRODUCT, WAITING_NATIVE_APP, NO_ACTIVE_WINDOW, OUTSIDE_COUPANG,
     WAITING_DETAIL_SCREEN, WAITING_TITLE, WAITING_OPTION, WAITING_CART_BUTTON,
-    IDENTITY_STABILIZING, SCROLLING_DETAIL, VERIFIED, CLICK_CLAIMED,
+    IDENTITY_STABILIZING, SCROLLING_DETAIL, CHECKING_PRICE, VERIFIED, CLICK_CLAIMED,
     WAITING_CONFIRMATION, CONFIRMED, CANCELLED, TIMED_OUT, FAILED,
 }
 
@@ -97,17 +98,19 @@ object CartAssistController {
         var lastScrollAt: Long = 0,
         var identitySeenAt: Long = 0,
     ) {
+        var priceCheckPassed = request.maxTotalWon == null
+        var checkedPriceWon: Long? = null
         private var actionStarted = false
         /** Claims before any external effect, and refuses read-only requests before persistence. */
         fun claimBeforeEffect(persistClaim: () -> Boolean): Boolean {
-            if (request.verifyOnly || clickClaimed) return false
+            if (request.verifyOnly || clickClaimed || !priceCheckPassed) return false
             clickClaimed = true
             return persistClaim()
         }
 
         /** Independent last gate at the service action boundary, including a mistaken claim. */
         fun performClaimedAction(action: () -> Boolean): Boolean {
-            if (request.verifyOnly || !clickClaimed || actionStarted) return false
+            if (request.verifyOnly || !clickClaimed || actionStarted || !priceCheckPassed) return false
             actionStarted = true
             return action().also { clickAccepted = it }
         }
@@ -161,7 +164,14 @@ object CartAssistController {
         check(Looper.myLooper() == Looper.getMainLooper())
         if (session != null || AutoBuyController.isActive() || ProductLinkImportController.isActive()) return false
         appContext = context.applicationContext
-        if (!validRequest(request)) return reject("상품 주소와 화면에 표시되는 상품명·옵션을 확인해 주세요.")
+        if (!validRequest(request)) return reject("상품의 정확한 옵션 주소와 상품명·옵션·한도를 확인해 주세요.")
+        if (!request.verifyOnly) {
+            val previous = try { CartAdditionLedger(context).lookup(request.productUrl) }
+            catch (_: Exception) { return reject("이전 담기 기록을 읽지 못해 중복 추가를 막았습니다. 기록을 확인해 주세요.") }
+            if (previous != null) return reject(if (previous.status == CartAdditionLedger.Status.CONFIRMED)
+                "이 옵션은 앱에서 담기 완료를 확인한 기록이 있습니다. 쿠팡 장바구니를 확인한 뒤 기록을 해제해야 다시 담을 수 있습니다."
+                else "이 옵션은 이전 담기 요청의 결과 확인이 필요합니다. 쿠팡 장바구니를 확인한 뒤 기록을 해제해 주세요.")
+        }
         if (!isEnabled(context)) {
             return reject("접근성 설정에서 다시담기 장바구니 도우미를 직접 켠 뒤 다시 시도해 주세요.")
         }
@@ -234,7 +244,10 @@ object CartAssistController {
     internal fun claimClick(current: Session): Boolean {
         if (current.request.verifyOnly || session !== current || current.clickClaimed) return false
         // Claim in memory before disk or the external effect; event re-entry cannot click twice.
-        if (!current.claimBeforeEffect { persist(current.id, "click_claimed", false) }) {
+        if (!current.claimBeforeEffect {
+                val context = requireNotNull(appContext)
+                CartAdditionLedger(context).claim(current.request.productUrl, current.id) && persist(current.id, "click_claimed", false)
+            }) {
             reportStage(current, CartAssistStage.CLICK_CLAIMED)
             finish("중복 처리 방지 기록을 저장하지 못해 담기 버튼을 누르지 않았습니다.", false)
             return false
@@ -256,6 +269,29 @@ object CartAssistController {
         if (session !== current) return
         updateDiagnostics(mutableDiagnostics.value.copy(scannedNodeCount = nodeCount,
             resourceIdNodeCount = resourceIdCount, scanTruncated = truncated, detailStructure = structure))
+    }
+
+    internal fun checkPrice(current: Session, nodes: List<CartAssistPolicy.Node>, truncated: Boolean): Boolean {
+        if (session !== current) return false
+        reportStage(current, CartAssistStage.CHECKING_PRICE)
+        if (truncated && current.request.maxTotalWon != null) {
+            finish("상품가 확인에 필요한 화면을 끝까지 읽지 못해 담지 않았습니다.", false)
+            return false
+        }
+        return when (val result = CartPricePolicy.check(nodes, current.request.maxTotalWon)) {
+            CartPricePolicy.Result.Unrestricted -> { current.priceCheckPassed = true; true }
+            is CartPricePolicy.Result.Allowed -> {
+                current.checkedPriceWon = result.priceWon
+                current.priceCheckPassed = true
+                true
+            }
+            is CartPricePolicy.Result.Blocked -> { finish(result.message, false); false }
+        }
+    }
+
+    internal fun clearRecordedAddition(context: Context, url: String): Boolean {
+        if (session != null || CartBatchController.isRunning() || AutoBuyController.isActive() || ProductLinkImportController.isActive()) return false
+        return CartAdditionLedger(context).clear(url)
     }
 
     internal fun finishVerified(current: Session) {
@@ -289,8 +325,13 @@ object CartAssistController {
         } else if (!success && diagnostics.value.stopReason == CartAssistStopReason.NONE) {
             mutableDiagnostics.value = diagnostics.value.copy(stopReason = CartAssistStopReason.OTHER)
         }
+        val receiptSaved = !success || current.request.verifyOnly || runCatching {
+            CartAdditionLedger(requireNotNull(appContext)).confirm(current.request.productUrl, current.id)
+        }.getOrDefault(false)
         persist(current.id, current.resultStatus(success), current.request.verifyOnly)
-        mutableState.value = CartAssistState.Finished(message, success, verifiedOnly = success && current.request.verifyOnly)
+        val priceMessage = current.checkedPriceWon?.let { " 상품가 ${java.text.NumberFormat.getIntegerInstance(java.util.Locale.KOREA).format(it)}원을 등록 한도 안에서 확인했습니다. 배송비·최종 결제 금액은 별도입니다." }.orEmpty()
+        mutableState.value = CartAssistState.Finished(message + (if (success) priceMessage else "") +
+            (if (receiptSaved) "" else " 완료 기록 저장에 실패해 결과 확인 필요 상태를 유지합니다."), success, verifiedOnly = success && current.request.verifyOnly)
     }
 
     private fun reject(message: String): Boolean {
@@ -365,7 +406,9 @@ object CartAssistController {
             ?.commit() == true
 
     internal fun validRequest(request: CartAssistRequest): Boolean = runCatching {
-        CoupangCartProductLink.parse(request.productUrl)
+        if (request.verifyOnly) CoupangCartProductLink.parse(request.productUrl)
+        else CoupangCartProductLink.parseExactOption(request.productUrl)
+        require(request.maxTotalWon == null || request.maxTotalWon in 1L..100_000_000L)
         CartAssistPolicy.normalize(request.expectedTitle).length >= 4 &&
             CartAssistPolicy.normalizeOption(request.expectedOption).length >= 2 &&
             request.expectedTitle.length <= 250 && request.expectedOption.length <= 120
