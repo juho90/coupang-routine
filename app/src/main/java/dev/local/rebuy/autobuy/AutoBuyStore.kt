@@ -52,6 +52,12 @@ class AutoBuyStore internal constructor(
         return saved
     }
 
+    suspend fun removeProfile(itemId: String) {
+        dataStore.edit { preferences ->
+            preferences[PROFILES] = encodeProfiles(readProfiles(preferences).filterNot { it.itemId == itemId })
+        }
+    }
+
     suspend fun setEnabled(itemId: String, enabled: Boolean) {
         require(!enabled) { AutoBuyPolicy.PURCHASE_BLOCKED_MESSAGE }
         dataStore.edit { preferences ->

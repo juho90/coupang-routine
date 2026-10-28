@@ -54,7 +54,6 @@ internal fun CartBatchDialog(items: List<RoutineItem>, today: Long, onPreparingC
     val dueCount = CartBatchSelection.select(items, today, CartBatchScope.DUE).size
     val activeCount = CartBatchSelection.select(items, today, CartBatchScope.ALL_ACTIVE).size
     val pausedCount = items.count { !it.archived && !it.enabled }
-    val archivedCount = items.count { it.archived }
     val invalid = targets.filter {
         it.quantity != 1 || CartAssistPolicy.normalize(it.title).length < 4 ||
             it.title.length > 250 || CartAssistPolicy.normalizeOption(it.option).length < 2 ||
@@ -165,7 +164,7 @@ internal fun CartBatchDialog(items: List<RoutineItem>, today: Long, onPreparingC
                 }
                 Text("한 번에 최대 20개 상품을 각각 1개씩 담습니다. 같은 옵션의 앱 담기 기록이 있으면 재추가를 막고 멈춥니다. 직접 담은 상품은 알 수 없으므로 실제 장바구니도 확인해 주세요.", style = MaterialTheme.typography.bodySmall)
                 Text("한도가 있는 상품은 담기 전 화면의 상품가를 비교합니다. 초과·가격 불명확·담기 실패 시 나머지는 멈춥니다. 배송비·최종 결제 금액은 별도이며 주문·결제·구매 완료 기록은 실행하지 않습니다.", style = MaterialTheme.typography.bodySmall)
-                if (pausedCount > 0 || archivedCount > 0) Text("대상에서 제외: 일시정지 ${pausedCount}개 · 보관 ${archivedCount}개", style = MaterialTheme.typography.bodySmall)
+                if (pausedCount > 0) Text("대상에서 제외: 일시정지 ${pausedCount}개", style = MaterialTheme.typography.bodySmall)
                 if (preparing) {
                     LinearProgressIndicator(Modifier.fillMaxWidth())
                     Text("상품 링크 확인 ${minOf(resolvingIndex + 1, pending?.size ?: 0)} / ${pending?.size ?: 0}")

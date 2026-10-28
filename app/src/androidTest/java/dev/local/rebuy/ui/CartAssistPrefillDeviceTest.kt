@@ -94,7 +94,7 @@ class CartAssistPrefillDeviceTest {
             compose.runOnIdle { assertEquals(Lifecycle.State.RESUMED, compose.activity.lifecycle.currentState) }
             runBlocking {
                 assertEquals(original, container.repository.getItem(original.id))
-                assertTrue(container.repository.history.first().none { it.itemId == original.id })
+                assertTrue(container.purchaseLogs.logs.first().none { it.itemId == original.id })
                 assertTrue(AutoBuyStore(compose.activity).attempts.first().none { it.itemId == original.id })
             }
         } finally {
@@ -103,7 +103,7 @@ class CartAssistPrefillDeviceTest {
                 val own = created?.id?.let { container.repository.getItem(it) }
                     ?: container.repository.items.first().find { it.title == title }
                 own?.let { item ->
-                    container.repository.archiveItem(item.id)
+                    container.repository.deleteItem(item.id)
                     container.scheduler.cancelNotification(item.id)
                     try { container.scheduler.reconcileAll() }
                     finally {

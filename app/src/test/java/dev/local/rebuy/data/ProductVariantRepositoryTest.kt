@@ -53,7 +53,7 @@ class ProductVariantRepositoryTest {
         assertEquals(before.enabled, after.enabled)
         assertEquals(before.createdAtEpochMillis, after.createdAtEpochMillis)
         assertNotEquals(before.cycleId, after.cycleId)
-        assertTrue(repository.history.first().isEmpty())
+        assertTrue(dev.local.rebuy.data.PurchaseLogRepository(database).logs.first().isEmpty())
         repository.selectVariant(id, second.productUrl)
         assertEquals(after.cycleId, repository.getItem(id)?.cycleId)
         assertEquals(CompletionResult.Stale, repository.completePurchase(id, before.cycleId))
@@ -82,7 +82,7 @@ class ProductVariantRepositoryTest {
             repository.saveItem(id, "임의 상품명", first.productUrl, 2, 8, 20_710, first.option, null, choices)
         }.isFailure)
         assertEquals(before, repository.getItem(id))
-        assertTrue(repository.history.first().isEmpty())
+        assertTrue(dev.local.rebuy.data.PurchaseLogRepository(database).logs.first().isEmpty())
     }
 
     @Test fun fullSaveRetainsOnlyExplicitlySuppliedChoices() = runTest {
@@ -107,7 +107,7 @@ class ProductVariantRepositoryTest {
         assertEquals(before.createdAtEpochMillis, after.createdAtEpochMillis)
         assertEquals(before.nextPurchaseEpochDay, after.nextPurchaseEpochDay)
         assertNotEquals(before.cycleId, after.cycleId)
-        assertTrue(repository.history.first().isEmpty())
+        assertTrue(dev.local.rebuy.data.PurchaseLogRepository(database).logs.first().isEmpty())
     }
 
     @Test fun choicesRejectOtherProductsDuplicateAddressesAndMalformedJson() {

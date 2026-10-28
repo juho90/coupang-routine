@@ -1,11 +1,12 @@
 package dev.local.rebuy.data
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
 import java.util.UUID
 
-/** Snapshots survive item edits and archival. There is deliberately no cascading delete. */
+/** Independent, immutable completion snapshots. Product IDs correlate events; they are not foreign keys. */
 @Entity(
     tableName = "purchase_records",
     indices = [Index(value = ["itemId", "cycleId"], unique = true)],
@@ -19,4 +20,5 @@ data class PurchaseRecord(
     val quantity: Int,
     val scheduledEpochDay: Long,
     val completedAtEpochMillis: Long,
+    @ColumnInfo(defaultValue = "NULL") val purchaseOption: String? = null,
 )

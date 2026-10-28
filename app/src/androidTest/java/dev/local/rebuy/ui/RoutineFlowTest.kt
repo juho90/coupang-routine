@@ -100,7 +100,7 @@ class RoutineFlowTest {
             compose.waitUntil(10_000) {
                 runBlocking { container.repository.getItem(original.id)?.cycleId != original.cycleId }
             }
-            compose.onNodeWithText("구매 이력").performClick()
+            compose.onNodeWithText("구매 로그").performClick()
             compose.waitUntil(10_000) {
                 compose.onAllNodesWithText(title).fetchSemanticsNodes().isNotEmpty()
             }
@@ -111,23 +111,22 @@ class RoutineFlowTest {
                 assertEquals(original.purchaseOption, updated.purchaseOption)
                 assertEquals(original.maxTotalWon, updated.maxTotalWon)
                 assertTrue(updated.nextPurchaseEpochDay in earliestNextDate..LocalDate.now().plusDays(7).toEpochDay())
-                val record = container.repository.history.first().single { it.itemId == original.id }
+                val record = container.purchaseLogs.logs.first().single { it.itemId == original.id }
                 assertEquals(2, record.quantity)
                 assertEquals(original.cycleId, record.cycleId)
                 assertEquals(CompletionResult.AlreadyRecorded, container.repository.completePurchase(original.id, original.cycleId))
-                assertEquals(1, container.repository.history.first().count { it.itemId == original.id })
+                assertEquals(1, container.purchaseLogs.logs.first().count { it.itemId == original.id })
             }
         } finally {
             runBlocking {
                 val ownItem = created ?: container.repository.items.first().find { it.title == title }
                 ownItem?.let {
-                    container.repository.archiveItem(it.id)
+                    container.repository.deleteItem(it.id)
                     container.scheduler.cancelNotification(it.id)
                     try {
                         container.scheduler.reconcileAll()
                     } finally {
-                        // Remove only this test's UUID-owned data; ordinary app archival
-                        // continues to retain all purchase history.
+                        // Remove only this test's UUID-owned completion logs.
                         container.database.withTransaction {
                             container.database.openHelper.writableDatabase.delete("purchase_records", "itemId = ?", arrayOf(it.id))
                             container.database.openHelper.writableDatabase.delete("routine_items", "id = ?", arrayOf(it.id))

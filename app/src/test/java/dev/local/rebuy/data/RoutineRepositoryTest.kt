@@ -63,7 +63,7 @@ class RoutineRepositoryTest {
         val before = requireNotNull(repository.getItem(id))
         assertEquals(CompletionResult.Completed, repository.completePurchase(id, before.cycleId))
         val after = requireNotNull(repository.getItem(id))
-        val record = repository.history.first().single()
+        val record = dev.local.rebuy.data.PurchaseLogRepository(database).logs.first().single()
         assertEquals(day("2026-10-29"), after.nextPurchaseEpochDay)
         assertNotEquals(before.cycleId, after.cycleId)
         assertEquals(before.cycleId, record.cycleId)
@@ -87,7 +87,7 @@ class RoutineRepositoryTest {
         }
         val boundaryRepository = RoutineRepository(database, advancingClock)
         assertEquals(CompletionResult.Completed, boundaryRepository.completePurchase(id, item.cycleId))
-        assertEquals(boundaryMillis, boundaryRepository.history.first().single().completedAtEpochMillis)
+        assertEquals(boundaryMillis, dev.local.rebuy.data.PurchaseLogRepository(database).logs.first().single().completedAtEpochMillis)
         assertEquals(day("2026-10-28"), boundaryRepository.getItem(id)?.nextPurchaseEpochDay)
     }
 
@@ -120,7 +120,7 @@ class RoutineRepositoryTest {
         }.awaitAll()
         assertEquals(1, results.count { it == CompletionResult.Completed })
         assertEquals(23, results.count { it == CompletionResult.AlreadyRecorded })
-        assertEquals(1, repository.history.first().size)
+        assertEquals(1, dev.local.rebuy.data.PurchaseLogRepository(database).logs.first().size)
         assertEquals(day("2026-10-29"), repository.getItem(id)?.nextPurchaseEpochDay)
         assertEquals(CompletionResult.AlreadyRecorded, repository.completePurchase(id, cycle))
     }
@@ -131,13 +131,13 @@ class RoutineRepositoryTest {
         val before = requireNotNull(repository.getItem(id))
         save(id = id, quantity = 8, due = "2026-12-01")
         assertEquals(CompletionResult.Stale, repository.completePurchase(id, before.cycleId))
-        assertTrue(repository.history.first().isEmpty())
+        assertTrue(dev.local.rebuy.data.PurchaseLogRepository(database).logs.first().isEmpty())
         assertEquals(8, repository.getItem(id)?.quantity)
         assertEquals(day("2026-12-01"), repository.getItem(id)?.nextPurchaseEpochDay)
     }
 
     @Test
-    fun dueQueryFiltersFuturePausedAndArchivedItems() = runTest {
+    fun dueQueryFiltersFuturePausedAndDeletedItems() = runTest {
         val overdue = save(due = "2026-10-01")
         val today = save(due = "2026-10-22")
         save(due = "2026-10-23")
@@ -146,27 +146,30 @@ class RoutineRepositoryTest {
         val pausedCycle = requireNotNull(repository.getItem(paused)).cycleId
         val archivedCycle = requireNotNull(repository.getItem(archived)).cycleId
         repository.setEnabled(paused, false)
-        repository.archiveItem(archived)
+        repository.deleteItem(archived)
         assertEquals(listOf(overdue, today), repository.getDueItems(day("2026-10-22")).map { it.id })
         assertEquals(CompletionResult.Stale, repository.completePurchase(paused, pausedCycle))
-        assertEquals(CompletionResult.Stale, repository.completePurchase(archived, archivedCycle))
+        assertEquals(CompletionResult.NotFound, repository.completePurchase(archived, archivedCycle))
         assertFalse(repository.items.first().any { it.id == archived })
-        assertTrue(requireNotNull(repository.getItem(archived)).archived)
+        assertNull(repository.getItem(archived))
         repository.setEnabled(paused, true)
         assertNotEquals(pausedCycle, repository.getItem(paused)?.cycleId)
         assertTrue(repository.getDueItems(day("2026-10-22")).any { it.id == paused })
     }
 
     @Test
-    fun historySurvivesLaterEditsAndArchival() = runTest {
-        val id = save(title = "이전 이름", quantity = 3)
+    fun logsSurviveLaterEditsAndDeletion() = runTest {
+        val id = save(title = "이전 이름", quantity = 3, purchaseOption = "600ml, 3개")
         val before = requireNotNull(repository.getItem(id))
         repository.completePurchase(id, before.cycleId)
         save(id = id, title = "새 이름", quantity = 9, url = "https://link.coupang.com/a/new")
-        repository.archiveItem(id)
-        val record = repository.history.first().single()
+        repository.deleteItem(id)
+        val record = dev.local.rebuy.data.PurchaseLogRepository(database).logs.first().single()
         assertEquals("이전 이름", record.title)
         assertEquals(3, record.quantity)
+        assertEquals("600ml, 3개", record.purchaseOption)
+        assertNull(repository.getItem(id))
+        assertFalse(repository.deleteItem(id))
         assertEquals(before.productUrl, record.productUrl)
         assertEquals(CompletionResult.AlreadyRecorded, repository.completePurchase(id, before.cycleId))
         assertTrue(repository.items.first().isEmpty())
@@ -183,7 +186,7 @@ class RoutineRepositoryTest {
     @Test
     fun missingItemIsReportedWithoutWritingHistory() = runTest {
         assertEquals(CompletionResult.NotFound, repository.completePurchase("missing", "missing-cycle"))
-        assertTrue(repository.history.first().isEmpty())
+        assertTrue(dev.local.rebuy.data.PurchaseLogRepository(database).logs.first().isEmpty())
     }
 
     @Test
@@ -217,7 +220,7 @@ class RoutineRepositoryTest {
         assertEquals(100_000_000L, item.maxTotalWon)
         assertEquals(999, item.quantity)
         assertEquals(listOf(item), repository.items.first())
-        assertTrue(repository.history.first().isEmpty())
+        assertTrue(dev.local.rebuy.data.PurchaseLogRepository(database).logs.first().isEmpty())
     }
 
     @Test
@@ -278,7 +281,7 @@ class RoutineRepositoryTest {
         assertEquals(80_000L, after.maxTotalWon)
         assertNotEquals(before.cycleId, after.cycleId)
         assertEquals(CompletionResult.Stale, repository.completePurchase(id, before.cycleId))
-        assertTrue(repository.history.first().isEmpty())
+        assertTrue(dev.local.rebuy.data.PurchaseLogRepository(database).logs.first().isEmpty())
     }
 
     @Test
@@ -295,6 +298,23 @@ class RoutineRepositoryTest {
         assertNotNull("The fixture constraint must reject the write", failure)
         assertEquals(before, repository.getItem(id))
         assertEquals(listOf(before), repository.items.first())
+    }
+
+    @Test
+    fun deletedRegistrationCannotRecordANewCycleAndCanBeRecreated() = runTest {
+        val id = save(title = "삭제 대상", purchaseOption = "600ml, 2개")
+        val item = requireNotNull(repository.getItem(id))
+        val otherId = save(title = "유지할 상품")
+        assertTrue(repository.deleteItem(id))
+        assertNull(repository.getItem(id))
+        assertNotNull(repository.getItem(otherId))
+        assertEquals(CompletionResult.NotFound, repository.completePurchase(id, item.cycleId))
+        assertTrue(PurchaseLogRepository(database).logs.first().isEmpty())
+        val replacementId = save(title = item.title, url = item.productUrl, purchaseOption = item.purchaseOption)
+        assertNotEquals(id, replacementId)
+        assertNotEquals(item.cycleId, repository.getItem(replacementId)?.cycleId)
+        assertFalse(repository.deleteItem(id))
+        assertEquals(2, repository.items.first().size)
     }
 
     private suspend fun save(

@@ -169,7 +169,7 @@ fun RebuyApp(
         var tab by rememberSaveable { mutableIntStateOf(0) }
         var showEditor by rememberSaveable { mutableStateOf(false) }
         var editorId by rememberSaveable { mutableStateOf<String?>(null) }
-        var archiveId by rememberSaveable { mutableStateOf<String?>(null) }
+        var deleteId by rememberSaveable { mutableStateOf<String?>(null) }
         var optionImportId by rememberSaveable { mutableStateOf<String?>(null) }
         var showCartAssist by rememberSaveable { mutableStateOf(false) }
         var showCartBatch by rememberSaveable { mutableStateOf(false) }
@@ -190,7 +190,7 @@ fun RebuyApp(
                     if (!showEditor) editorId = null
                     if (showAutoBuy) AutoBuyController.cancel()
                     showAutoBuy = false
-                    archiveId = null
+                    deleteId = null
                     viewModel.dismissCompletion()
                     tab = 0
                     showEditor = true
@@ -222,7 +222,7 @@ fun RebuyApp(
                     showEditor = false
                     showCartAssist = false
                     showAutoBuy = false
-                    archiveId = null
+                    deleteId = null
                     viewModel.dismissCompletion()
                     showCartBatch = true
                 }
@@ -243,7 +243,7 @@ fun RebuyApp(
                     },
                     actions = {
                         Surface(color = MaterialTheme.colorScheme.surfaceContainer, shape = RoundedCornerShape(50)) {
-                            Text("내 기기 보관", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp))
+                            Text("내 기기 저장", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp))
                         }
                         Spacer(Modifier.width(20.dp))
                     },
@@ -252,7 +252,7 @@ fun RebuyApp(
             },
             bottomBar = {
                 NavigationBar(containerColor = MaterialTheme.colorScheme.surface, tonalElevation = 0.dp) {
-                    listOf("구매 목록" to RebuyIconKind.Basket, "구매 이력" to RebuyIconKind.History, "설정" to RebuyIconKind.Settings).forEachIndexed { index, (label, icon) ->
+                    listOf("구매 목록" to RebuyIconKind.Basket, "구매 로그" to RebuyIconKind.History, "설정" to RebuyIconKind.Settings).forEachIndexed { index, (label, icon) ->
                         NavigationBarItem(
                             selected = tab == index, onClick = { tab = index },
                             icon = { RebuyIcon(icon) }, label = { Text(label) },
@@ -283,7 +283,7 @@ fun RebuyApp(
                         requestPermission,
                         onEdit = { editorId = it.id; showEditor = true },
                         onToggle = { viewModel.setEnabled(it, !it.enabled) },
-                        onArchive = { archiveId = it.id },
+                        onDelete = { deleteId = it.id },
                         onOpen = onOpen, onComplete = viewModel::requestCompletion,
                         onCartAssist = { onCartAssist(it) },
                         onAutoBuy = { onAutoBuy(it) },
@@ -291,7 +291,7 @@ fun RebuyApp(
                         onSelectVariant = viewModel::selectVariant,
                         onAddVariant = { if (!busy) optionImportId = it.id },
                     )
-                    tab == 1 -> HistoryList(state.history, onOpen)
+                    tab == 1 -> PurchaseLogList(state.purchaseLogs)
                     else -> SettingsScreen(state.settings, notificationsAllowed, busy, requestPermission, ::openNotificationSettings, viewModel::updateSettings, { onAutoBuy(null) })
                 }
             }
@@ -347,7 +347,7 @@ fun RebuyApp(
                     Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         Text("${prompt.title} · ${prompt.quantity}개", fontWeight = FontWeight.SemiBold)
                         Text("예정일 ${formatDate(prompt.scheduledEpochDay)}")
-                        Text("쿠팡에서 직접 결제한 뒤 확인해 주세요. 구매 이력을 남기고 완료일을 기준으로 다음 구매일을 갱신합니다.")
+                        Text("쿠팡에서 직접 결제한 뒤 확인해 주세요. 구매 로그를 남기고 완료일을 기준으로 다음 구매일을 갱신합니다.")
                         Text("같은 예정 건은 한 번만 기록됩니다.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 },
@@ -355,13 +355,13 @@ fun RebuyApp(
                 dismissButton = { TextButton(onClick = viewModel::dismissCompletion, enabled = !busy) { Text("아직이에요") } },
             )
         }
-        state.items.firstOrNull { it.id == archiveId }?.let { item ->
+        state.items.firstOrNull { it.id == deleteId }?.let { item ->
             AlertDialog(
-                onDismissRequest = { archiveId = null },
-                title = { Text("구매 목록에서 보관할까요?") },
-                text = { Text("${item.title}의 알림을 종료합니다. 기존 구매 이력은 계속 확인할 수 있습니다.") },
-                confirmButton = { TextButton(onClick = { viewModel.archive(item); archiveId = null }, enabled = !busy) { Text("보관") } },
-                dismissButton = { TextButton(onClick = { archiveId = null }) { Text("취소") } },
+                onDismissRequest = { if (!busy) deleteId = null },
+                title = { Text("상품을 삭제할까요?") },
+                text = { Text("${item.title}의 등록 정보와 알림을 삭제합니다. 이 작업은 되돌릴 수 없습니다. 기존 구매 로그는 별도로 유지되며 쿠팡 장바구니는 변경하지 않습니다.") },
+                confirmButton = { TextButton(onClick = { viewModel.deleteItem(item) { deleteId = null } }, enabled = !busy, modifier = Modifier.testTag("delete-product-confirm")) { Text("삭제", color = MaterialTheme.colorScheme.error) } },
+                dismissButton = { TextButton(onClick = { deleteId = null }, enabled = !busy) { Text("취소") } },
             )
         }
     }
@@ -371,7 +371,7 @@ fun RebuyApp(
 private fun RoutineList(
     source: List<RoutineItem>, today: Long, notificationsAllowed: Boolean, remindersEnabled: Boolean, busy: Boolean,
     requestPermission: () -> Unit, onEdit: (RoutineItem) -> Unit, onToggle: (RoutineItem) -> Unit,
-    onArchive: (RoutineItem) -> Unit, onOpen: (String) -> Unit, onComplete: (RoutineItem) -> Unit,
+    onDelete: (RoutineItem) -> Unit, onOpen: (String) -> Unit, onComplete: (RoutineItem) -> Unit,
     onCartAssist: (RoutineItem) -> Unit,
     onAutoBuy: (RoutineItem) -> Unit,
     batchRunning: Boolean, onCartBatch: () -> Unit,
@@ -439,7 +439,7 @@ private fun RoutineList(
             EmptyState(if (all.isEmpty()) "첫 상품을 등록해 보세요" else "이 목록은 아직 비어 있어요", "쿠팡의 상품 또는 공유 URL을 붙여 넣고\n수량과 구매 주기를 정해 주세요.", Modifier.padding(top = 44.dp))
         }
         items(visible, key = { it.id }) { item ->
-            RoutineCard(item, today, busy, onEdit, onToggle, onArchive, onOpen, onComplete, onCartAssist, onAutoBuy, onSelectVariant, onAddVariant)
+            RoutineCard(item, today, busy, onEdit, onToggle, onDelete, onOpen, onComplete, onCartAssist, onAutoBuy, onSelectVariant, onAddVariant)
         }
         if (visible.isNotEmpty()) item {
             Text("장바구니에서 주문한 뒤 구매 완료를 기록해 주세요. 결제는 직접 확인합니다.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 6.dp))
@@ -450,7 +450,7 @@ private fun RoutineList(
 @Composable
 private fun RoutineCard(
     item: RoutineItem, today: Long, busy: Boolean,
-    onEdit: (RoutineItem) -> Unit, onToggle: (RoutineItem) -> Unit, onArchive: (RoutineItem) -> Unit,
+    onEdit: (RoutineItem) -> Unit, onToggle: (RoutineItem) -> Unit, onDelete: (RoutineItem) -> Unit,
     onOpen: (String) -> Unit, onComplete: (RoutineItem) -> Unit,
     onCartAssist: (RoutineItem) -> Unit,
     onAutoBuy: (RoutineItem) -> Unit,
@@ -496,7 +496,7 @@ private fun RoutineCard(
                         DropdownMenuItem(text = { Text("상품 수정") }, onClick = { menu = false; onEdit(item) })
                         DropdownMenuItem(text = { Text("결제 전 시험") }, onClick = { menu = false; onAutoBuy(item) })
                         DropdownMenuItem(text = { Text(if (item.enabled) "알림 일시정지" else "알림 다시 시작") }, onClick = { menu = false; onToggle(item) })
-                        DropdownMenuItem(text = { Text("목록에서 보관") }, onClick = { menu = false; onArchive(item) })
+                        DropdownMenuItem(text = { Text("상품 삭제", color = MaterialTheme.colorScheme.error) }, onClick = { menu = false; onDelete(item) }, modifier = Modifier.testTag("delete-product"))
                     }
                 }
             }
@@ -562,52 +562,32 @@ private fun RoutineCard(
 }
 
 @Composable
-private fun HistoryList(history: List<PurchaseRecord>, onOpen: (String) -> Unit) {
-    if (history.isEmpty()) {
-        EmptyState("구매 이력이 쌓이는 곳", "쿠팡에서 구매한 뒤 완료를 확인하면\n상품과 수량, 완료 시간이 여기에 남아요.")
+private fun PurchaseLogList(logs: List<PurchaseRecord>) {
+    if (logs.isEmpty()) {
+        EmptyState("구매 로그가 쌓이는 곳", "구매 완료를 확인하면 당시 상품과 옵션,\n수량과 완료 시간이 기록됩니다.")
         return
     }
-    LazyColumn(contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().testTag("purchase-log-list"),
+        contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
         item {
-            Row(
-                modifier = Modifier.padding(bottom = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = RoundedCornerShape(14.dp)) {
-                    Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) {
-                        RebuyIcon(RebuyIconKind.History, Modifier.size(22.dp), tint = MaterialTheme.colorScheme.primary)
-                    }
+            Text("구매 로그", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+            Text("직접 완료 확인한 ${logs.size}건 · 상품 삭제 후에도 유지됩니다.", modifier = Modifier.padding(top = 8.dp, bottom = 12.dp), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        items(logs.sortedByDescending { it.completedAtEpochMillis }, key = { it.id }) { record ->
+            Column(Modifier.fillMaxWidth().testTag("purchase-log-entry"), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    RebuyIcon(RebuyIconKind.Check, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+                    Text(Instant.ofEpochMilli(record.completedAtEpochMillis).atZone(ZoneId.systemDefault()).format(historyFormat), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("나의 구매 기록", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                    Text("직접 확인한 구매 ${history.size}건", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
+                Text(record.title, style = MaterialTheme.typography.titleMedium)
+                record.purchaseOption?.let { Text("옵션 · $it", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                Text("${record.quantity}개 · 예정일 ${formatDate(record.scheduledEpochDay)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                HorizontalDivider(Modifier.padding(top = 10.dp), color = MaterialTheme.colorScheme.outlineVariant)
             }
         }
-        items(history.sortedByDescending { it.completedAtEpochMillis }, key = { it.id }) { record ->
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-            ) {
-                Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                        RebuyIcon(RebuyIconKind.Check, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
-                        Text(Instant.ofEpochMilli(record.completedAtEpochMillis).atZone(ZoneId.systemDefault()).format(historyFormat), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    Text(record.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                    Text("${record.quantity}개 구매 · 예정일 ${formatDate(record.scheduledEpochDay)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    TextButton(onClick = { onOpen(record.productUrl) }, contentPadding = PaddingValues(0.dp)) {
-                        Text("상품 다시 보기")
-                        Spacer(Modifier.width(6.dp))
-                        RebuyIcon(RebuyIconKind.ExternalLink, Modifier.size(16.dp))
-                    }
-                }
-            }
-        }
-        item { Text("기록은 사용자의 완료 확인을 바탕으로 저장됩니다.", modifier = Modifier.padding(top = 2.dp, bottom = 16.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        item { Text("사용자가 구매 완료를 확인한 시점의 정보를 기록합니다.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 16.dp)) }
     }
 }
 
@@ -695,7 +675,7 @@ private fun SettingsScreen(
         }
         Column(Modifier.padding(top = 8.dp, bottom = 20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("나만의 로컬 구매 메모", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
-            Text("상품과 구매 이력은 이 기기에 저장됩니다. 서버와 로그인 없이 사용하며, 앱을 삭제하면 저장한 정보도 삭제됩니다.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("상품 설정과 구매 로그는 별도로 이 기기에 저장됩니다. 서버와 로그인 없이 사용하며, 앱을 삭제하면 저장한 정보도 삭제됩니다.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text("쿠팡 앱의 상품 화면을 확인해 장바구니에 담습니다. 주문·결제와 구매 완료 기록은 직접 확인해 주세요.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }

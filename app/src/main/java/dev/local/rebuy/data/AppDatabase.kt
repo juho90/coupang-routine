@@ -5,12 +5,18 @@ import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
-@Database(entities = [RoutineItem::class, PurchaseRecord::class], version = 3, exportSchema = true)
+@Database(entities = [RoutineItem::class, PurchaseRecord::class], version = 4, exportSchema = true)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun routineDao(): RoutineDao
     abstract fun purchaseDao(): PurchaseDao
 
     companion object {
+        val MIGRATION_3_4: Migration = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE purchase_records ADD COLUMN purchaseOption TEXT DEFAULT NULL")
+            }
+        }
+
         val MIGRATION_1_2: Migration = object : Migration(1, 2) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE routine_items ADD COLUMN purchaseOption TEXT DEFAULT NULL")

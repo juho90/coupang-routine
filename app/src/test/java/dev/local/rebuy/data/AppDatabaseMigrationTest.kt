@@ -20,7 +20,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.SQLiteMode
 
-/** Validates on-disk upgrades through Room v3. Short test names avoid Windows temporary-path limits. */
+/** Validates on-disk upgrades through Room v4. Short test names avoid Windows temporary-path limits. */
 @RunWith(RobolectricTestRunner::class)
 @Config(application = Application::class, sdk = [28])
 @SQLiteMode(SQLiteMode.Mode.NATIVE)
@@ -37,10 +37,10 @@ class AppDatabaseMigrationTest {
     @Test fun v1RowsAndHistorySurviveMigration() = runBlocking {
         createVersionOneFixture()
         val database = Room.databaseBuilder(context, AppDatabase::class.java, databaseName)
-            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3)
+            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4)
             .allowMainThreadQueries()
             .build().also { migrated = it }
-        assertEquals(3, database.openHelper.writableDatabase.version)
+        assertEquals(4, database.openHelper.writableDatabase.version)
         val repository = RoutineRepository(database)
         val active = requireNotNull(repository.getItem("active-v1"))
         val paused = requireNotNull(repository.getItem("paused-v1"))
@@ -72,9 +72,9 @@ class AppDatabaseMigrationTest {
             title = "구매 당시 상품명", productUrl = PRODUCT_URL, quantity = 2,
             scheduledEpochDay = 20_690, completedAtEpochMillis = 1_000,
         )
-        assertEquals(listOf(expectedHistory), repository.history.first())
+        assertEquals(listOf(expectedHistory), dev.local.rebuy.data.PurchaseLogRepository(database).logs.first())
         assertEquals(-1L, database.purchaseDao().insertOnce(expectedHistory.copy(id = "duplicate-after-migration")))
-        assertEquals(listOf(expectedHistory), repository.history.first())
+        assertEquals(listOf(expectedHistory), dev.local.rebuy.data.PurchaseLogRepository(database).logs.first())
 
         repository.saveItem(active.id, active.title, active.productUrl, active.quantity, active.intervalDays,
             active.nextPurchaseEpochDay, purchaseOption = "600ml,2개", maxTotalWon = 75_000, productVariantsJson = null)
@@ -83,7 +83,7 @@ class AppDatabaseMigrationTest {
         assertEquals(75_000L, updated.maxTotalWon)
         assertNotEquals(active.cycleId, updated.cycleId)
         assertTrue(updated.enabled)
-        assertEquals(listOf(expectedHistory), repository.history.first())
+        assertEquals(listOf(expectedHistory), dev.local.rebuy.data.PurchaseLogRepository(database).logs.first())
     }
 
     @Test fun v2ConditionsAndHistorySurviveMigration() = runBlocking {
@@ -95,18 +95,46 @@ class AppDatabaseMigrationTest {
             fixture.version = 2
         }
         val database = Room.databaseBuilder(context, AppDatabase::class.java, databaseName)
-            .addMigrations(AppDatabase.MIGRATION_2_3)
+            .addMigrations(AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4)
             .allowMainThreadQueries()
             .build().also { migrated = it }
-        assertEquals(3, database.openHelper.writableDatabase.version)
+        assertEquals(4, database.openHelper.writableDatabase.version)
         val item = requireNotNull(database.routineDao().getItem("active-v1"))
         assertEquals("600ml,2개", item.purchaseOption)
         assertEquals(75_000L, item.maxTotalWon)
         assertNull(item.productVariantsJson)
         assertEquals("cycle-active", item.cycleId)
         assertEquals(3, item.quantity)
-        assertEquals(1, database.purchaseDao().observeHistory().first().size)
+        assertEquals(1, database.purchaseDao().observeLogs().first().size)
     }
+    @Test fun v3To4KeepsLogs() = runBlocking {
+        createVersionOneFixture()
+        SQLiteDatabase.openDatabase(context.getDatabasePath(databaseName).absolutePath, null, SQLiteDatabase.OPEN_READWRITE).use { fixture ->
+            fixture.execSQL("ALTER TABLE routine_items ADD COLUMN purchaseOption TEXT DEFAULT NULL")
+            fixture.execSQL("ALTER TABLE routine_items ADD COLUMN maxTotalWon INTEGER DEFAULT NULL")
+            fixture.execSQL("ALTER TABLE routine_items ADD COLUMN productVariantsJson TEXT DEFAULT NULL")
+            fixture.execSQL("UPDATE routine_items SET purchaseOption = '600ml, 2개', maxTotalWon = 75000 WHERE id = 'active-v1'")
+            fixture.version = 3
+        }
+        val database = Room.databaseBuilder(context, AppDatabase::class.java, databaseName)
+            .addMigrations(AppDatabase.MIGRATION_3_4).allowMainThreadQueries().build().also { migrated = it }
+        assertEquals(4, database.openHelper.writableDatabase.version)
+        val logs = PurchaseLogRepository(database)
+        val old = logs.logs.first().single()
+        assertNull(old.purchaseOption)
+        assertEquals("구매 당시 상품명", old.title)
+        val repository = RoutineRepository(database)
+        val item = requireNotNull(repository.getItem("active-v1"))
+        assertEquals("600ml, 2개", item.purchaseOption)
+        assertEquals(dev.local.rebuy.domain.CompletionResult.Completed, repository.completePurchase(item.id, item.cycleId))
+        val beforeDelete = logs.logs.first()
+        assertEquals("600ml, 2개", beforeDelete.single { it.cycleId == item.cycleId }.purchaseOption)
+        assertTrue(repository.deleteItem(item.id))
+        assertNull(repository.getItem(item.id))
+        assertEquals(beforeDelete, logs.logs.first())
+        database.openHelper.writableDatabase.query("PRAGMA foreign_key_list(purchase_records)").use { assertEquals(0, it.count) }
+    }
+
     private fun createVersionOneFixture() {
         val file = context.getDatabasePath(databaseName)
         check(file.parentFile?.mkdirs() == true || file.parentFile?.isDirectory == true)

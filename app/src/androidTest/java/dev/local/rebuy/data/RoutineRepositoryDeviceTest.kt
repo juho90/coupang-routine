@@ -40,7 +40,7 @@ class RoutineRepositoryDeviceTest {
     fun tearDown() = database.close()
 
     @Test
-    fun concurrentCompletionIsAtomicAndHistorySurvivesArchive() = runBlocking {
+    fun concurrentCompletionIsAtomicAndLogsSurviveDeletion() = runBlocking {
         val id = repository.saveItem(null, "화장지", "https://www.coupang.com/vp/products/123", 2, 14,
             LocalDate.of(2026, 10, 21).toEpochDay(), purchaseOption = null, maxTotalWon = null, productVariantsJson = null)
         val cycle = requireNotNull(repository.getItem(id)).cycleId
@@ -48,10 +48,11 @@ class RoutineRepositoryDeviceTest {
         assertEquals(1, results.count { it == CompletionResult.Completed })
         assertEquals(11, results.count { it == CompletionResult.AlreadyRecorded })
         assertEquals(LocalDate.of(2026, 11, 4).toEpochDay(), repository.getItem(id)?.nextPurchaseEpochDay)
-        repository.archiveItem(id)
+        repository.deleteItem(id)
+        assertNull(repository.getItem(id))
         assertTrue(repository.items.first().isEmpty())
-        assertEquals(1, repository.history.first().size)
-        assertEquals("화장지", repository.history.first().single().title)
+        assertEquals(1, dev.local.rebuy.data.PurchaseLogRepository(database).logs.first().size)
+        assertEquals("화장지", dev.local.rebuy.data.PurchaseLogRepository(database).logs.first().single().title)
     }
 
     @Test
@@ -62,6 +63,6 @@ class RoutineRepositoryDeviceTest {
         )
         assertNotEquals(-1L, database.purchaseDao().insertOnce(record))
         assertEquals(-1L, database.purchaseDao().insertOnce(record.copy(id = "another-record")))
-        assertEquals(1, repository.history.first().size)
+        assertEquals(1, dev.local.rebuy.data.PurchaseLogRepository(database).logs.first().size)
     }
 }

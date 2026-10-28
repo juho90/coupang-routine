@@ -20,7 +20,6 @@ class RoutineRepository(
     private val purchaseDao = database.purchaseDao()
 
     val items: Flow<List<RoutineItem>> = routineDao.observeItems()
-    val history: Flow<List<PurchaseRecord>> = purchaseDao.observeHistory()
 
     // Resolve the default zone per operation so a timezone change in a running process is honored.
     // Injected clocks keep their explicit zone for deterministic tests.
@@ -144,18 +143,7 @@ class RoutineRepository(
         )
     }
 
-    suspend fun archiveItem(id: String) = database.withTransaction {
-        val item = routineDao.getItem(id) ?: return@withTransaction
-        if (item.archived) return@withTransaction
-        routineDao.update(
-            item.copy(
-                archived = true,
-                enabled = false,
-                cycleId = UUID.randomUUID().toString(),
-                updatedAtEpochMillis = effectiveClock().millis(),
-            ),
-        )
-    }
+    suspend fun deleteItem(id: String): Boolean = routineDao.deleteById(id) > 0
 
     /**
      * A whole cycle is consumed atomically. Replayed notifications or concurrent taps cannot
@@ -181,6 +169,7 @@ class RoutineRepository(
                     quantity = item.quantity,
                     scheduledEpochDay = item.nextPurchaseEpochDay,
                     completedAtEpochMillis = now,
+                    purchaseOption = item.purchaseOption,
                 ),
             )
             if (inserted == -1L) return@withTransaction CompletionResult.AlreadyRecorded

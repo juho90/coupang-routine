@@ -195,6 +195,24 @@ class AutoBuyStoreTest {
         assertNotNull(store.claimAttempt(current, saved, dryRun = true))
     }
 
+    @Test fun deletingProductSetupRetainsAttemptsAndUnrelatedProfiles() = runBlocking {
+        val first = item()
+        val second = item().copy(id = "other-item")
+        val savedProfile = store.saveProfile(profile(first))
+        val otherProfile = store.saveProfile(profile(second))
+        val attempt = requireNotNull(store.claimAttempt(first, savedProfile, dryRun = true))
+        val before = store.attempts.first()
+        store.removeProfile(first.id)
+        assertNull(store.getProfile(first.id))
+        assertEquals(otherProfile, store.getProfile(second.id))
+        assertEquals(before, store.attempts.first())
+        assertEquals(attempt, store.getAttempt(attempt.id))
+        assertNull(store.claimAttempt(first, savedProfile, dryRun = true))
+        assertFalse(store.markExternalMutationStarted(attempt.id))
+        store.removeProfile(first.id)
+        assertEquals(before, store.attempts.first())
+    }
+
     private suspend fun expectInvalid(block: suspend () -> Unit) {
         try {
             block()

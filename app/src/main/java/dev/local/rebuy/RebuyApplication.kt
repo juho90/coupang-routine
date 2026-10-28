@@ -5,6 +5,7 @@ import android.content.Context
 import androidx.room.Room
 import dev.local.rebuy.data.AppDatabase
 import dev.local.rebuy.data.RoutineRepository
+import dev.local.rebuy.data.PurchaseLogRepository
 import dev.local.rebuy.reminders.ReminderScheduler
 import dev.local.rebuy.settings.SettingsRepository
 import dev.local.rebuy.autobuy.AutoBuyStore
@@ -22,9 +23,10 @@ class RebuyApplication : Application() {
 
 class AppContainer(context: Context) {
     val database = Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, "rebuy.db")
-        .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3)
+        .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4)
         .build()
     val repository = RoutineRepository(database)
+    val purchaseLogs = PurchaseLogRepository(database)
     val settings = SettingsRepository(context.applicationContext)
     val scheduler = ReminderScheduler(context.applicationContext, repository, settings)
     val autoBuyStore = AutoBuyStore(context.applicationContext)

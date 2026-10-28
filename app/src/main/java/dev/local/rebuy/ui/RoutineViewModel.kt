@@ -3,6 +3,7 @@ package dev.local.rebuy.ui
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.local.rebuy.data.PurchaseRecord
+import dev.local.rebuy.data.PurchaseLogRepository
 import dev.local.rebuy.data.RoutineItem
 import dev.local.rebuy.data.RoutineRepository
 import dev.local.rebuy.domain.CompletionResult
@@ -26,7 +27,7 @@ import kotlinx.coroutines.launch
 
 data class RoutineUiState(
     val items: List<RoutineItem> = emptyList(),
-    val history: List<PurchaseRecord> = emptyList(),
+    val purchaseLogs: List<PurchaseRecord> = emptyList(),
     val settings: ReminderSettings = ReminderSettings(),
     val loading: Boolean = true,
     val loadError: String? = null,
@@ -43,9 +44,11 @@ data class CompletionPrompt(
 /** All completion entry points carry a snapshot of the cycle, never a newly looked-up cycle. */
 class RoutineViewModel(
     private val repository: RoutineRepository,
+    private val purchaseLogs: PurchaseLogRepository,
     private val scheduler: ReminderScheduler,
     private val settingsRepository: SettingsRepository,
     private val releaseCartRecord: (String) -> Boolean,
+    private val removeProductSetup: suspend (String) -> Unit,
 ) : ViewModel() {
     private val messages = Channel<String>(Channel.BUFFERED)
     val events = messages.receiveAsFlow()
@@ -54,8 +57,8 @@ class RoutineViewModel(
     private val _completionPrompt = MutableStateFlow<CompletionPrompt?>(null)
     val completionPrompt: StateFlow<CompletionPrompt?> = _completionPrompt.asStateFlow()
 
-    val state = combine(repository.items, repository.history, settingsRepository.settings) { items, history, settings ->
-        RoutineUiState(items = items, history = history, settings = settings, loading = false)
+    val state = combine(repository.items, purchaseLogs.logs, settingsRepository.settings) { items, logs, settings ->
+        RoutineUiState(items = items, purchaseLogs = logs, settings = settings, loading = false)
     }.catch { error ->
         if (error is CancellationException) throw error
         emit(RoutineUiState(loading = false, loadError = "저장된 정보를 불러오지 못했습니다. 앱을 다시 열어 주세요."))
@@ -105,10 +108,13 @@ class RoutineViewModel(
         reconcileAfterChange(if (enabled) "구매 알림을 다시 시작했습니다" else "구매 알림을 잠시 멈췄습니다")
     }
 
-    fun archive(item: RoutineItem) = mutate {
-        repository.archiveItem(item.id)
+    fun deleteItem(item: RoutineItem, onDeleted: () -> Unit) = mutate {
+        removeProductSetup(item.id)
+        val deleted = repository.deleteItem(item.id)
+        if (_completionPrompt.value?.itemId == item.id) _completionPrompt.value = null
         scheduler.cancelNotification(item.id)
-        reconcileAfterChange("목록에서 보관했습니다. 구매 이력은 유지됩니다")
+        onDeleted()
+        reconcileAfterChange(if (deleted) "상품을 삭제했습니다. 구매 로그는 유지됩니다" else "이미 삭제된 상품입니다. 구매 로그는 유지됩니다")
     }
 
     fun requestCompletion(item: RoutineItem) {
