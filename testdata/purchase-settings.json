@@ -1,0 +1,177 @@
+{
+  "schemaVersion": 1,
+  "id": "purchase-settings",
+  "configuredDate": "2026-10-28",
+  "mode": "cycle_only",
+  "description": "기존 등록 상품의 구매 주기 설정 샘플입니다. 마지막 요청에 따라 주기만 변경했습니다.",
+  "applyFields": [
+    "intervalDays"
+  ],
+  "preserveFields": [
+    "title",
+    "productUrl",
+    "purchaseOption",
+    "quantity",
+    "enabled",
+    "nextPurchaseEpochDay",
+    "maxTotalWon",
+    "productVariantsJson",
+    "purchaseLogs"
+  ],
+  "referencePolicy": "첫 구매 포장은 요청 표의 참고 정보이며 실제 상품 옵션·주문 수량의 변경 지시가 아닙니다. configuredSnapshot은 2026-10-28 저장 직후의 참고값으로 재적용하지 않습니다.",
+  "application": "앱의 상품 수정 화면에서 네 품목의 주기만 반영했습니다. 이 파일 자체를 가져오는 기능은 없습니다.",
+  "items": [
+    {
+      "id": "banana",
+      "itemName": "바나나",
+      "requestedFirstPackReferenceOnly": "800g × 1",
+      "requestedCycle": "매주",
+      "registeredProduct": {
+        "title": "스미후루 감숙왕 바나나, 800g 내외, 1개",
+        "purchaseOption": "800g 내외, 1개"
+      },
+      "policy": "interval",
+      "applyFields": [
+        "intervalDays"
+      ],
+      "intervalDays": 7,
+      "configuredSnapshot": {
+        "intervalDays": 7,
+        "enabled": true,
+        "quantity": 1,
+        "nextPurchaseDate": "2026-10-28",
+        "maxTotalWon": 3990
+      }
+    },
+    {
+      "id": "protein-bar",
+      "itemName": "포스트 단백질바 미니",
+      "requestedFirstPackReferenceOnly": "21개입 × 1",
+      "requestedCycle": "약 10일마다",
+      "registeredProduct": {
+        "title": "포스트 단백질바 미니 21p, 231g, 1개",
+        "purchaseOption": "231g, 1개"
+      },
+      "policy": "interval",
+      "applyFields": [
+        "intervalDays"
+      ],
+      "intervalDays": 10,
+      "configuredSnapshot": {
+        "intervalDays": 10,
+        "enabled": true,
+        "quantity": 1,
+        "nextPurchaseDate": "2026-10-28",
+        "maxTotalWon": null
+      }
+    },
+    {
+      "id": "eggs",
+      "itemName": "반숙란",
+      "requestedFirstPackReferenceOnly": "6~15개",
+      "requestedCycle": "소비기한에 맞춰",
+      "registeredProduct": {
+        "title": "구운계란/훈제란",
+        "purchaseOption": "15구, 1개"
+      },
+      "policy": "note_only",
+      "applyFields": [],
+      "intervalDays": null,
+      "configuredSnapshot": {
+        "intervalDays": 30,
+        "enabled": true,
+        "quantity": 1,
+        "nextPurchaseDate": "2026-10-28",
+        "maxTotalWon": null
+      },
+      "note": "소비기한에 맞춰. 고정 일수를 지정하지 않았으므로 기존 주기와 활성 상태를 변경하지 않았습니다. 기존 구운계란/훈제란 15구 옵션을 유지합니다."
+    },
+    {
+      "id": "tuna",
+      "itemName": "참치",
+      "requestedFirstPackReferenceOnly": "100g × 10캔",
+      "requestedCycle": "1~2개월",
+      "registeredProduct": {
+        "title": "동원참치 라이트 스탠다드, 150g, 10개",
+        "purchaseOption": "150g, 10개"
+      },
+      "policy": "interval",
+      "applyFields": [
+        "intervalDays"
+      ],
+      "intervalDays": 45,
+      "configuredSnapshot": {
+        "intervalDays": 45,
+        "enabled": true,
+        "quantity": 1,
+        "nextPurchaseDate": "2026-10-28",
+        "maxTotalWon": null
+      },
+      "note": "1~2개월의 대표값으로 45일을 적용했습니다. 기존 150g × 10캔 옵션은 유지합니다."
+    },
+    {
+      "id": "shrimp",
+      "itemName": "자숙새우",
+      "requestedFirstPackReferenceOnly": "250g × 1",
+      "requestedCycle": "냉동실이 있을 때만",
+      "registeredProduct": {
+        "title": "프리미어 칵테일 쉬림프 새우 WITH 소스 (냉동), 250g, 1개",
+        "purchaseOption": "250g, 1개"
+      },
+      "policy": "note_only",
+      "applyFields": [],
+      "intervalDays": null,
+      "configuredSnapshot": {
+        "intervalDays": 30,
+        "enabled": true,
+        "quantity": 1,
+        "nextPurchaseDate": "2026-10-28",
+        "maxTotalWon": null
+      },
+      "note": "냉동실이 있을 때만. 고정 일수를 지정하지 않았으므로 기존 주기와 활성 상태를 변경하지 않았습니다."
+    },
+    {
+      "id": "smoked-salmon",
+      "itemName": "훈제연어",
+      "requestedFirstPackReferenceOnly": "180g × 1",
+      "requestedCycle": "먹을 주에 구매",
+      "registeredProduct": {
+        "title": "OZEN 훈제연어 슬라이스 허브 딜 (냉장), 180g, 1개",
+        "purchaseOption": "180g, 1개"
+      },
+      "policy": "note_only",
+      "applyFields": [],
+      "intervalDays": null,
+      "configuredSnapshot": {
+        "intervalDays": 30,
+        "enabled": true,
+        "quantity": 1,
+        "nextPurchaseDate": "2026-10-28",
+        "maxTotalWon": null
+      },
+      "note": "먹을 주에 구매. 고정 일수를 지정하지 않았으므로 기존 주기와 활성 상태를 변경하지 않았습니다."
+    },
+    {
+      "id": "porridge",
+      "itemName": "양반죽",
+      "requestedFirstPackReferenceOnly": "12개 내외",
+      "requestedCycle": "약 2주마다",
+      "registeredProduct": {
+        "title": "동원 용기죽 4종 기획세트 쇠고기3+야채3+참치3+전복3",
+        "purchaseOption": "285g × 1세트"
+      },
+      "policy": "interval",
+      "applyFields": [
+        "intervalDays"
+      ],
+      "intervalDays": 14,
+      "configuredSnapshot": {
+        "intervalDays": 14,
+        "enabled": true,
+        "quantity": 1,
+        "nextPurchaseDate": "2026-11-26",
+        "maxTotalWon": 26980
+      }
+    }
+  ]
+}
