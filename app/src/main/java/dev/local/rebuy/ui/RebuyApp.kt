@@ -30,6 +30,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
@@ -415,7 +416,7 @@ private fun RoutineList(
         }
         item {
             Row(modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("전체 ${all.size}", "예정 $dueCount", "일시정지 ${all.count { !it.enabled }}").forEachIndexed { index, text ->
+                listOf("전체 ${all.size}", "예정 $dueCount", "비활성 ${all.count { !it.enabled }}").forEachIndexed { index, text ->
                     FilterChip(selected = filter == index, onClick = { filter = index }, label = { Text(text) })
                 }
             }
@@ -462,7 +463,7 @@ private fun RoutineCard(
                         shape = RoundedCornerShape(6.dp),
                     ) {
                         Text(
-                            when { !item.enabled -> "일시정지"; item.nextPurchaseEpochDay < today -> "예정일 지남"; isDue -> "오늘 구매 예정"; else -> "${item.nextPurchaseEpochDay - today}일 뒤" },
+                            when { !item.enabled -> "비활성"; item.nextPurchaseEpochDay < today -> "예정일 지남"; isDue -> "오늘 구매 예정"; else -> "${item.nextPurchaseEpochDay - today}일 뒤" },
                             style = MaterialTheme.typography.labelSmall,
                             modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
                         )
@@ -479,7 +480,6 @@ private fun RoutineCard(
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                         DropdownMenuItem(text = { Text("상품 수정") }, onClick = { menu = false; onEdit(item) })
                         DropdownMenuItem(text = { Text("결제 전 시험") }, onClick = { menu = false; onAutoBuy(item) })
-                        DropdownMenuItem(text = { Text(if (item.enabled) "알림 일시정지" else "알림 다시 시작") }, onClick = { menu = false; onToggle(item) })
                         DropdownMenuItem(text = { Text("상품 삭제", color = MaterialTheme.colorScheme.error) }, onClick = { menu = false; onDelete(item) }, modifier = Modifier.testTag("delete-product"))
                     }
                 }
@@ -496,11 +496,23 @@ private fun RoutineCard(
                     item.maxTotalWon?.let { maximum ->
                         Text("금액 한도 ${NumberFormat.getIntegerInstance(Locale.KOREA).format(maximum)}원", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                    TextButton(
-                        onClick = { onComplete(item) }, enabled = item.enabled && !busy,
-                        contentPadding = PaddingValues(horizontal = 8.dp),
-                        modifier = Modifier.align(Alignment.End).testTag("complete-purchase"),
-                    ) { Text("구매 완료 기록", style = MaterialTheme.typography.labelMedium) }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Switch(
+                                checked = item.enabled, onCheckedChange = { onToggle(item) }, enabled = !busy,
+                                modifier = Modifier.testTag("product-enabled").semantics {
+                                    contentDescription = "${item.title} 활성화"
+                                    stateDescription = if (item.enabled) "활성" else "비활성"
+                                },
+                            )
+                            Text(if (item.enabled) "활성" else "비활성", style = MaterialTheme.typography.labelMedium)
+                        }
+                        TextButton(
+                            onClick = { onComplete(item) }, enabled = item.enabled && !busy,
+                            contentPadding = PaddingValues(horizontal = 8.dp),
+                            modifier = Modifier.testTag("complete-purchase"),
+                        ) { Text("구매 완료 기록", style = MaterialTheme.typography.labelMedium) }
+                    }
                 }
             }
         }

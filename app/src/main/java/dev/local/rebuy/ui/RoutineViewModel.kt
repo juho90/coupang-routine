@@ -75,7 +75,7 @@ class RoutineViewModel(
     fun setEnabled(item: RoutineItem, enabled: Boolean) = mutate {
         repository.setEnabled(item.id, enabled)
         scheduler.cancelNotification(item.id)
-        reconcileAfterChange(if (enabled) "구매 알림을 다시 시작했습니다" else "구매 알림을 잠시 멈췄습니다")
+        reconcileAfterChange(if (enabled) "상품을 활성화했습니다" else "상품을 비활성화했습니다")
     }
 
     fun deleteItem(item: RoutineItem, onDeleted: () -> Unit) = mutate {
