@@ -397,9 +397,9 @@ private fun RoutineList(
     ) {
         item {
             Column(Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("나의 구매 루틴", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-                Text("필요한 날, 다시 담아요", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                Text("자주 사는 상품을 한곳에서 챙기세요.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("나의 구매 일정", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                Text("다시 살 때를 놓치지 않게", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                Text("옵션과 구매일을 확인하고, 필요할 때 다시 담으세요.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
 
@@ -449,13 +449,8 @@ private fun RoutineCard(
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
         shape = RoundedCornerShape(20.dp),
     ) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.Top) {
-                Surface(color = MaterialTheme.colorScheme.surfaceContainer, shape = RoundedCornerShape(14.dp)) {
-                    Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) {
-                        RebuyIcon(RebuyIconKind.Basket, tint = MaterialTheme.colorScheme.primary)
-                    }
-                }
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Surface(
                         color = if (isDue) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.surfaceContainer,
@@ -486,34 +481,88 @@ private fun RoutineCard(
             }
             Surface(
                 modifier = Modifier.fillMaxWidth().testTag("product-purchase-info"),
-                color = MaterialTheme.colorScheme.surfaceContainer,
-                shape = RoundedCornerShape(14.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerLow,
+                shape = RoundedCornerShape(16.dp),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
             ) {
-                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("옵션 · ${item.purchaseOption?.takeIf { it.isNotBlank() } ?: "링크에 지정된 옵션"}", style = MaterialTheme.typography.bodyMedium)
-                    Text("다음 구매 ${formatDate(item.nextPurchaseEpochDay)} · ${item.intervalDays}일마다", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    if (item.quantity != 1) Text("구매 수량 ${item.quantity}개", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    item.maxTotalWon?.let { maximum ->
-                        Text("금액 한도 ${NumberFormat.getIntegerInstance(Locale.KOREA).format(maximum)}원", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("구매 옵션", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(
+                            item.purchaseOption?.takeIf { it.isNotBlank() } ?: "링크에 지정된 옵션",
+                            style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.testTag("purchase-option-summary"),
+                        )
                     }
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Switch(
-                                checked = item.enabled, onCheckedChange = { onToggle(item) }, enabled = !busy,
-                                modifier = Modifier.testTag("product-enabled").semantics {
-                                    contentDescription = "${item.title} 활성화"
-                                    stateDescription = if (item.enabled) "활성" else "비활성"
-                                },
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.Bottom) {
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text("다음 구매일", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(
+                                formatDate(item.nextPurchaseEpochDay), style = MaterialTheme.typography.headlineSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = if (item.enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.testTag("next-purchase-date"),
                             )
-                            Text(if (item.enabled) "활성" else "비활성", style = MaterialTheme.typography.labelMedium)
                         }
-                        TextButton(
-                            onClick = { onComplete(item) }, enabled = item.enabled && !busy,
-                            contentPadding = PaddingValues(horizontal = 8.dp),
-                            modifier = Modifier.testTag("complete-purchase"),
-                        ) { Text("구매 완료 기록", style = MaterialTheme.typography.labelMedium) }
+                        Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text("구매 주기", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("${item.intervalDays}일마다", style = MaterialTheme.typography.titleMedium)
+                        }
                     }
+                    if (item.quantity != 1) Text("구매 수량 ${item.quantity}개", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    item.maxTotalWon?.let { maximum ->
+                        Text("금액 한도 ${NumberFormat.getIntegerInstance(Locale.KOREA).format(maximum)}원", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    ProductCompletionControls(item, busy, onToggle, onComplete)
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProductCompletionControls(
+    item: RoutineItem, busy: Boolean,
+    onToggle: (RoutineItem) -> Unit, onComplete: (RoutineItem) -> Unit,
+) {
+    val activation: @Composable () -> Unit = {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Switch(
+                checked = item.enabled, onCheckedChange = { onToggle(item) }, enabled = !busy,
+                modifier = Modifier.testTag("product-enabled").semantics {
+                    contentDescription = "${item.title} 활성화"
+                    stateDescription = if (item.enabled) "활성" else "비활성"
+                },
+            )
+            Text(if (item.enabled) "활성" else "비활성", style = MaterialTheme.typography.labelMedium)
+        }
+    }
+    val complete: @Composable (Modifier) -> Unit = { modifier ->
+        Button(
+            onClick = { onComplete(item) }, enabled = item.enabled && !busy,
+            modifier = modifier.heightIn(min = 48.dp).testTag("complete-purchase"),
+            shape = RoundedCornerShape(12.dp),
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+        ) {
+            RebuyIcon(RebuyIconKind.Check, Modifier.size(18.dp))
+            Spacer(Modifier.width(6.dp))
+            Text("구매 완료 기록", style = MaterialTheme.typography.labelLarge)
+        }
+    }
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        if (maxWidth < 360.dp) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Text("상품 상태", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    activation()
+                }
+                complete(Modifier.fillMaxWidth())
+            }
+        } else {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                activation()
+                complete(Modifier)
             }
         }
     }

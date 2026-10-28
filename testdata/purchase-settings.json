@@ -28,7 +28,9 @@
       "requestedCycle": "매주",
       "registeredProduct": {
         "title": "스미후루 감숙왕 바나나, 800g 내외, 1개",
-        "purchaseOption": "800g 내외, 1개"
+        "purchaseOption": "800g 내외, 1개",
+        "productUrl": "https://www.coupang.com/vp/products/119171021?itemId=28707160468&vendorItemId=95648082694",
+        "urlHasOptionIds": true
       },
       "policy": "interval",
       "applyFields": [
@@ -50,7 +52,9 @@
       "requestedCycle": "약 10일마다",
       "registeredProduct": {
         "title": "포스트 단백질바 미니 21p, 231g, 1개",
-        "purchaseOption": "231g, 1개"
+        "purchaseOption": "231g, 1개",
+        "productUrl": "https://www.coupang.com/vp/products/8414651411?itemId=24408293401&vendorItemId=91422994119",
+        "urlHasOptionIds": true
       },
       "policy": "interval",
       "applyFields": [
@@ -72,7 +76,9 @@
       "requestedCycle": "소비기한에 맞춰",
       "registeredProduct": {
         "title": "구운계란/훈제란",
-        "purchaseOption": "15구, 1개"
+        "purchaseOption": "15구, 1개",
+        "productUrl": "https://www.coupang.com/vp/products/1194639177",
+        "urlHasOptionIds": false
       },
       "policy": "note_only",
       "applyFields": [],
@@ -93,7 +99,9 @@
       "requestedCycle": "1~2개월",
       "registeredProduct": {
         "title": "동원참치 라이트 스탠다드, 150g, 10개",
-        "purchaseOption": "150g, 10개"
+        "purchaseOption": "150g, 10개",
+        "productUrl": "https://www.coupang.com/vp/products/9392677909?itemId=18774582590&vendorItemId=91606918822",
+        "urlHasOptionIds": true
       },
       "policy": "interval",
       "applyFields": [
@@ -116,7 +124,9 @@
       "requestedCycle": "냉동실이 있을 때만",
       "registeredProduct": {
         "title": "프리미어 칵테일 쉬림프 새우 WITH 소스 (냉동), 250g, 1개",
-        "purchaseOption": "250g, 1개"
+        "purchaseOption": "250g, 1개",
+        "productUrl": "https://www.coupang.com/vp/products/9237263124?itemId=27311333239&vendorItemId=94277780580",
+        "urlHasOptionIds": true
       },
       "policy": "note_only",
       "applyFields": [],
@@ -137,7 +147,9 @@
       "requestedCycle": "먹을 주에 구매",
       "registeredProduct": {
         "title": "OZEN 훈제연어 슬라이스 허브 딜 (냉장), 180g, 1개",
-        "purchaseOption": "180g, 1개"
+        "purchaseOption": "180g, 1개",
+        "productUrl": "https://www.coupang.com/vp/products/8560934677?itemId=24792131793&vendorItemId=91799972148",
+        "urlHasOptionIds": true
       },
       "policy": "note_only",
       "applyFields": [],
@@ -158,7 +170,9 @@
       "requestedCycle": "약 2주마다",
       "registeredProduct": {
         "title": "동원 용기죽 4종 기획세트 쇠고기3+야채3+참치3+전복3",
-        "purchaseOption": "285g × 1세트"
+        "purchaseOption": "285g × 1세트",
+        "productUrl": "https://www.coupang.com/vp/products/9750360880?itemId=29195429057&vendorItemId=84144735664",
+        "urlHasOptionIds": true
       },
       "policy": "interval",
       "applyFields": [
@@ -173,5 +187,6 @@
         "maxTotalWon": 26980
       }
     }
-  ]
+  ],
+  "productLinkSource": "기존 앱 등록값을 상품 수정 화면에서 확인해 기록했습니다. 링크를 추측하거나 상품 정보를 다시 불러와 덮어쓰지 않았습니다."
 }
