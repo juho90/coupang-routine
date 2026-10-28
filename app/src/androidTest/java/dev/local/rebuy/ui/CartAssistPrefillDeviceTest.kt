@@ -68,13 +68,13 @@ class CartAssistPrefillDeviceTest {
             compose.waitUntil(10_000) { compose.onAllNodesWithTag("purchase-option").fetchSemanticsNodes().isEmpty() }
             compose.onNodeWithTag("routine-list").performScrollToNode(hasText(title))
             val ownCard = hasTestTag("routine-card") and hasAnyDescendant(hasText(title))
-            val detailButton = compose.onNode(hasTestTag("product-detail-open") and hasAnyAncestor(ownCard))
+            val moreButton = compose.onNode(hasTestTag("product-more") and hasAnyAncestor(ownCard))
             val cartButton = compose.onNodeWithTag("cart-open")
-            compose.waitUntil(10_000) { runCatching { detailButton.assertIsEnabled(); true }.getOrDefault(false) }
+            compose.waitUntil(10_000) { runCatching { moreButton.assertIsEnabled(); true }.getOrDefault(false) }
             compose.waitUntil(7_000) {
                 compose.onAllNodesWithText("상품을 저장했습니다", useUnmergedTree = true).fetchSemanticsNodes().isEmpty()
             }
-            detailButton.performScrollTo().performClick()
+            moreButton.performScrollTo().performClick()
             cartButton.performScrollTo().performClick()
             compose.openCartProductFields()
             compose.onNodeWithText("화면에 표시되는 옵션").performScrollTo().assertIsDisplayed()
@@ -87,7 +87,7 @@ class CartAssistPrefillDeviceTest {
             compose.onNodeWithText("닫기").performClick()
 
             // Reopening uses the registered source value, rather than a previous trial's draft.
-            detailButton.performScrollTo().assertIsEnabled().performClick()
+            moreButton.performScrollTo().assertIsEnabled().performClick()
             cartButton.performScrollTo().assertIsEnabled().performClick()
             compose.openCartProductFields()
             compose.onNodeWithText("화면에 표시되는 옵션").performScrollTo()

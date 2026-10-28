@@ -170,7 +170,6 @@ fun RebuyApp(
         var showEditor by rememberSaveable { mutableStateOf(false) }
         var editorId by rememberSaveable { mutableStateOf<String?>(null) }
         var deleteId by rememberSaveable { mutableStateOf<String?>(null) }
-        var detailId by rememberSaveable { mutableStateOf<String?>(null) }
         var optionImportId by rememberSaveable { mutableStateOf<String?>(null) }
         var showCartAssist by rememberSaveable { mutableStateOf(false) }
         var showCartBatch by rememberSaveable { mutableStateOf(false) }
@@ -183,7 +182,6 @@ fun RebuyApp(
         var autoBuyItemId by rememberSaveable { mutableStateOf<String?>(null) }
         LaunchedEffect(incomingImage?.id, state.loading, state.loadError, busy, showCartBatch) {
             if (incomingImage != null && !state.loading && state.loadError == null && !busy && !showCartBatch) {
-                detailId = null
                 if (showCartAssist) {
                     // Keep the cart URL and unsaved conditions while its image review opens.
                     CartAssistController.cancel()
@@ -293,7 +291,8 @@ fun RebuyApp(
                         onEdit = { editorId = it.id; showEditor = true },
                         onToggle = { viewModel.setEnabled(it, !it.enabled) },
                         onDelete = { deleteId = it.id },
-                        onDetail = { detailId = it.id }, onComplete = viewModel::requestCompletion,
+                        onOpen = onOpen, onComplete = viewModel::requestCompletion,
+                        onCartAssist = { onCartAssist(it) },
                         onAutoBuy = { onAutoBuy(it) },
                         batchRunning = batchState.running, onCartBatch = onCartBatch,
                         onSelectVariant = viewModel::selectVariant,
@@ -303,15 +302,6 @@ fun RebuyApp(
                     else -> SettingsScreen(state.settings, notificationsAllowed, busy, requestPermission, ::openNotificationSettings, viewModel::updateSettings, { onAutoBuy(null) })
                 }
             }
-        }
-        state.items.firstOrNull { it.id == detailId && !it.archived }?.let { item ->
-            ProductDetailSheet(
-                item = item,
-                busy = busy,
-                onDismiss = { detailId = null },
-                onOpen = { onOpen(item.productUrl) },
-                onCartAssist = { detailId = null; onCartAssist(item) },
-            )
         }
         if (showEditor && !state.loading) ItemEditor(
             item = state.items.firstOrNull { it.id == editorId },
@@ -388,7 +378,8 @@ fun RebuyApp(
 private fun RoutineList(
     source: List<RoutineItem>, today: Long, notificationsAllowed: Boolean, remindersEnabled: Boolean, busy: Boolean,
     requestPermission: () -> Unit, onEdit: (RoutineItem) -> Unit, onToggle: (RoutineItem) -> Unit,
-    onDelete: (RoutineItem) -> Unit, onDetail: (RoutineItem) -> Unit, onComplete: (RoutineItem) -> Unit,
+    onDelete: (RoutineItem) -> Unit, onOpen: (String) -> Unit, onComplete: (RoutineItem) -> Unit,
+    onCartAssist: (RoutineItem) -> Unit,
     onAutoBuy: (RoutineItem) -> Unit,
     batchRunning: Boolean, onCartBatch: () -> Unit,
     onSelectVariant: (RoutineItem, ProductVariant) -> Unit = { _, _ -> },
@@ -447,7 +438,7 @@ private fun RoutineList(
             EmptyState(if (all.isEmpty()) "첫 상품을 등록해 보세요" else "이 목록은 아직 비어 있어요", "쿠팡의 상품 또는 공유 URL을 붙여 넣고\n수량과 구매 주기를 정해 주세요.", Modifier.padding(top = 44.dp))
         }
         items(visible, key = { it.id }) { item ->
-            RoutineCard(item, today, busy, onEdit, onToggle, onDelete, onDetail, onComplete, onAutoBuy, onSelectVariant, onAddVariant)
+            RoutineCard(item, today, busy, onEdit, onToggle, onDelete, onOpen, onComplete, onCartAssist, onAutoBuy, onSelectVariant, onAddVariant)
         }
         if (visible.isNotEmpty()) item {
             Text("장바구니에서 주문한 뒤 구매 완료를 기록해 주세요. 결제는 직접 확인합니다.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 6.dp))
@@ -459,7 +450,8 @@ private fun RoutineList(
 private fun RoutineCard(
     item: RoutineItem, today: Long, busy: Boolean,
     onEdit: (RoutineItem) -> Unit, onToggle: (RoutineItem) -> Unit, onDelete: (RoutineItem) -> Unit,
-    onDetail: (RoutineItem) -> Unit, onComplete: (RoutineItem) -> Unit,
+    onOpen: (String) -> Unit, onComplete: (RoutineItem) -> Unit,
+    onCartAssist: (RoutineItem) -> Unit,
     onAutoBuy: (RoutineItem) -> Unit,
     onSelectVariant: (RoutineItem, ProductVariant) -> Unit = { _, _ -> },
     onAddVariant: (RoutineItem) -> Unit = {},
@@ -496,10 +488,13 @@ private fun RoutineCard(
                     Text(item.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, maxLines = 3, overflow = TextOverflow.Ellipsis)
                 }
                 Box {
-                    IconButton(onClick = { menu = true }, enabled = !busy, modifier = Modifier.size(48.dp).semantics { contentDescription = "${item.title} 관리" }) {
+                    IconButton(onClick = { menu = true }, enabled = !busy, modifier = Modifier.size(48.dp).testTag("product-more").semantics { contentDescription = "${item.title} 관리" }) {
                         RebuyIcon(RebuyIconKind.More, tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     DropdownMenu(expanded = menu && !busy, onDismissRequest = { menu = false }) {
+                        DropdownMenuItem(text = { Text("쿠팡 열기") }, onClick = { menu = false; onOpen(item.productUrl) }, modifier = Modifier.testTag("product-open"))
+                        DropdownMenuItem(text = { Text("장바구니 담기") }, onClick = { menu = false; onCartAssist(item) }, enabled = item.quantity == 1, modifier = Modifier.testTag("cart-open"))
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                         DropdownMenuItem(text = { Text("상품 수정") }, onClick = { menu = false; onEdit(item) })
                         DropdownMenuItem(text = { Text("결제 전 시험") }, onClick = { menu = false; onAutoBuy(item) })
                         DropdownMenuItem(text = { Text(if (item.enabled) "알림 일시정지" else "알림 다시 시작") }, onClick = { menu = false; onToggle(item) })
@@ -546,14 +541,6 @@ private fun RoutineCard(
                     Text("수량 · 주기", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text("${item.quantity}개 · ${item.intervalDays}일마다", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
                 }
-            }
-            OutlinedButton(
-                onClick = { onDetail(item) }, enabled = !busy,
-                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("product-detail-open"),
-                shape = RoundedCornerShape(12.dp),
-            ) {
-                Text("상세 보기", Modifier.weight(1f))
-                RebuyIcon(RebuyIconKind.ArrowRight, Modifier.size(18.dp))
             }
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
