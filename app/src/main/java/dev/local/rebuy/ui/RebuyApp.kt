@@ -456,7 +456,7 @@ private fun RoutineCard(
                         shape = RoundedCornerShape(6.dp),
                     ) {
                         Text(
-                            when { !item.enabled -> "비활성"; item.nextPurchaseEpochDay < today -> "예정일 지남"; isDue -> "오늘 구매 예정"; else -> "${item.nextPurchaseEpochDay - today}일 뒤" },
+                            when { !item.enabled -> "비활성"; item.nextPurchaseEpochDay < today -> "예정일 지남"; isDue -> "오늘"; else -> "${item.nextPurchaseEpochDay - today}일 뒤" },
                             style = MaterialTheme.typography.labelSmall,
                             modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
                         )

@@ -12,8 +12,8 @@ android {
         applicationId = "dev.local.rebuy"
         minSdk = 26
         targetSdk = 35
-        versionCode = 34
-        versionName = "0.14.2"
+        versionCode = 35
+        versionName = "0.14.3"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     buildFeatures { compose = true }
