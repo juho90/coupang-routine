@@ -87,7 +87,12 @@ class CartAssistService : AccessibilityService() {
                 CartAssistController.reportStage(current, CartAssistStage.OPENING_PRODUCT)
                 return
             }
-            val inspection = CartAssistPolicy.inspectCartTarget(nodes, current.request.expectedTitle, current.request.expectedOption)
+            val requirePrimaryOption = dev.local.rebuy.domain.CoupangCartProductLink.parse(current.request.productUrl).itemId == null
+            if (requirePrimaryOption && scan.truncated) {
+                CartAssistController.finish("상품 화면을 끝까지 확인하지 못해 담기를 중지했습니다.", false)
+                return
+            }
+            val inspection = CartAssistPolicy.inspectCartTarget(nodes, current.request.expectedTitle, current.request.expectedOption, requirePrimaryOption)
             val stage = when {
                 !inspection.detailScreen -> CartAssistStage.WAITING_DETAIL_SCREEN
                 !inspection.titleMatched -> CartAssistStage.WAITING_TITLE
@@ -155,7 +160,7 @@ class CartAssistService : AccessibilityService() {
         return ScanResult(snapshot.entries.map { entry ->
             val node = entry.node
             node to CartAssistPolicy.Node(
-                text = if (node.isPassword) "" else node.text?.toString().orEmpty(),
+                text = if (node.isPassword) "" else node.text?.toString().orEmpty().ifBlank { node.contentDescription?.toString().orEmpty() },
                 resourceId = entry.resourceId,
                 parentIndex = entry.parentIndex,
                 ancestorIds = entry.ancestorIds,

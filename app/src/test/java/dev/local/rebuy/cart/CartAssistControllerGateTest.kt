@@ -16,10 +16,14 @@ class CartAssistControllerGateTest {
     private fun request(url: String = "https://www.coupang.com/vp/products/123456?itemId=333&vendorItemId=444") =
         CartAssistRequest(url, "동원 용기죽 4종 기획세트", "285g × 1세트")
 
-    @Test fun nativeCartSessionRequiresExactOptionIdsAndReadOnlyCanInspectBasicProduct() {
+    @Test fun nativeCartSessionAcceptsGenericOrCompleteProductLinksButRejectsPartialOptionIds() {
         assertTrue(CartAssistController.validRequest(request()))
-        assertFalse(CartAssistController.validRequest(request("https://www.coupang.com/vp/products/123456")))
+        assertTrue(CartAssistController.validRequest(request("https://www.coupang.com/vp/products/123456")))
         assertTrue(CartAssistController.validRequest(request("https://www.coupang.com/vp/products/123456").copy(verifyOnly = true)))
+        for (partial in listOf("?itemId=333", "?vendorItemId=444")) {
+            val incomplete = request("https://www.coupang.com/vp/products/123456$partial")
+            assertFalse(CartAssistController.validRequest(incomplete))
+        }
         assertFalse(CartAssistController.validRequest(request("https://link.coupang.com/a/example")))
     }
 

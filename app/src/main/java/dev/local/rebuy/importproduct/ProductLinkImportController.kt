@@ -50,7 +50,7 @@ object ProductLinkImportController {
         check(Looper.myLooper() == Looper.getMainLooper())
         if (isActive()) return false
         val url = runCatching { CoupangCartProductLink.parse(resolvedFullUrl).canonicalUrl }.getOrNull()
-            ?: return reject(resolvedFullUrl, "옵션 식별자가 포함된 쿠팡 상품 주소를 먼저 확인해 주세요.")
+            ?: return reject(resolvedFullUrl, "쿠팡 상품 주소를 확인해 주세요.")
         if (CartAssistController.currentSession() != null || AutoBuyController.isActive() || CartBatchController.isRunning()) {
             return reject(url, "다른 구매 도우미가 실행 중입니다. 실행을 마친 뒤 정보를 불러와 주세요.")
         }
@@ -128,7 +128,7 @@ object ProductLinkImportController {
                 val buttonLabel = entry.resourceId == CartAssistPolicy.CART_TEXT_ID &&
                     CartAssistPolicy.BOTTOM_BUTTONS_ID in entry.ancestorIds
                 CartAssistPolicy.Node(
-                    text = if (!node.isPassword && (detailText || buttonLabel)) node.text?.toString().orEmpty() else "",
+                    text = if (!node.isPassword && (detailText || buttonLabel)) node.text?.toString().orEmpty().ifBlank { node.contentDescription?.toString().orEmpty() } else "",
                     resourceId = entry.resourceId, parentIndex = entry.parentIndex, ancestorIds = entry.ancestorIds,
                     visible = node.isVisibleToUser, enabled = node.isEnabled, clickable = node.isClickable,
                     childCount = entry.childCount,
@@ -201,15 +201,23 @@ internal object ProductLinkImportPolicy {
     private val detailNotice = Regex(
         "^(?:한\\s*달간\\s*[0-9,]+(?:만|천)?\\s*명.*구매.*|" +
             "(?:오늘|내일|모레)(?:\\([^)]*\\))?\\s*(?:새벽|오전|오후|[0-9]{1,2}시).*|" +
-            "[0-9]+\\s*일\\s*남음|구매\\s*[0-9]+\\s*위|브랜드\\s*샵)$",
+            "[0-9]+\\s*일\\s*남음|(?:.*\\s)?구매\\s*[0-9,]+\\s*위|브랜드\\s*샵)$",
     )
     fun inDetailContent(ancestors: List<String>): Boolean = ancestors.any { it in CartAssistPolicy.DETAIL_CONTENT_IDS } &&
         ancestors.none { it.contains("recommend", ignoreCase = true) }
 
     fun suggest(nodes: List<CartAssistPolicy.Node>): ProductTextSuggestions? {
         if (!CartAssistPolicy.isDetailScreen(nodes)) return null
-        return ProductTextParser.parse(nodes.asSequence()
+        val content = nodes.asSequence()
             .filter { it.visible && inDetailContent(it.ancestorIds) }
-            .map { it.text }.filter { it.isNotBlank() && !detailNotice.matches(it.trim()) }.take(200).toList())
+            .filter { it.text.isNotBlank() }.take(200).toList()
+        val suggestions = ProductTextParser.parse(content.asSequence().map { it.text }
+            .filterNot { detailNotice.matches(it.trim()) }.toList())
+        val primary = CartAssistPolicy.primaryTitleNode(content)?.text?.let {
+            ProductTextParser.parse(listOf(it))
+        } ?: return suggestions
+        val title = primary.titleCandidates.singleOrNull() ?: return suggestions
+        return suggestions.copy(titleCandidates = listOf(title),
+            optionCandidates = primary.optionCandidates.ifEmpty { suggestions.optionCandidates })
     }
 }

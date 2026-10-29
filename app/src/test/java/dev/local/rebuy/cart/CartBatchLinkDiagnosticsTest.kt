@@ -8,21 +8,30 @@ class CartBatchLinkDiagnosticsTest {
     private fun target(id: Int, productUrl: String = "https://www.coupang.com/vp/products/$id?itemId=${id}1&vendorItemId=${id}2") =
         CartBatchTarget("item-$id", "확인용 상품 이름 $id", productUrl, "600ml, ${id}개")
 
-    @Test fun genericAndPartialDirectLinksNameTheProductAndRequireItsSelectedOptionLink() {
-        val incompleteUrls = listOf(
-            "https://www.coupang.com/vp/products/20",
+    @Test fun genericDirectLinkRemainsAcceptedWithoutInventingOptionIds() {
+        val original = target(7, "https://m.coupang.com/vm/products/123/?utm_source=test")
+        assertNull(CartBatchValidation.directLinkProblem(original))
+        val prepared = CartBatchValidation.prepare(listOf(original)).single()
+        assertEquals("https://www.coupang.com/vp/products/123", prepared.productUrl)
+        assertEquals(original.copy(productUrl = prepared.productUrl), prepared)
+        val parsed = CoupangCartProductLink.parseForCart(prepared.productUrl)
+        assertNull(parsed.itemId)
+        assertNull(parsed.vendorItemId)
+    }
+
+    @Test fun partialDirectLinksNameTheOffendingProductAndRequireCompleteOptionInformation() {
+        val partialUrls = listOf(
             "https://www.coupang.com/vp/products/20?itemId=201",
             "https://www.coupang.com/vp/products/20?vendorItemId=202",
         )
-        for ((index, url) in incompleteUrls.withIndex()) {
+        for ((index, url) in partialUrls.withIndex()) {
             val offending = target(index + 2, url)
             val problem = requireNotNull(CartBatchValidation.directLinkProblem(offending))
             assertTrue(problem.contains(offending.title))
-            assertTrue(problem.contains(CoupangCartProductLink.EXACT_OPTION_REQUIRED_MESSAGE))
+            assertTrue(problem.contains("옵션"))
             val error = runCatching { CartBatchValidation.prepare(listOf(target(1), offending)) }.exceptionOrNull()
             assertTrue(error is IllegalArgumentException)
-            assertTrue(error?.message.orEmpty().contains(offending.title))
-            assertTrue(error?.message.orEmpty().contains(CoupangCartProductLink.EXACT_OPTION_REQUIRED_MESSAGE))
+            assertEquals(problem, error?.message)
         }
     }
 
@@ -35,6 +44,24 @@ class CartBatchLinkDiagnosticsTest {
         val parsed = CoupangCartProductLink.parseExactOption(prepared.productUrl)
         assertEquals("789", parsed.itemId)
         assertEquals("456", parsed.vendorItemId)
+    }
+
+    @Test fun genericAndExactLinksForTheSameProductCannotShareABatchInEitherOrder() {
+        val generic = target(1, "https://www.coupang.com/vp/products/123")
+        val exact = target(2, "https://www.coupang.com/vp/products/123?itemId=789&vendorItemId=456")
+        for (targets in listOf(listOf(generic, exact), listOf(exact, generic))) {
+            val before = targets.toList()
+            val error = runCatching { CartBatchValidation.prepare(targets) }.exceptionOrNull()
+            assertTrue(error is IllegalArgumentException)
+            assertTrue(error?.message.orEmpty().contains("같은 상품"))
+            assertEquals(before, targets)
+        }
+    }
+
+    @Test fun differentExactVariantsOfTheSameProductRemainDistinctBatchTargets() {
+        val first = target(1, "https://www.coupang.com/vp/products/123?itemId=789&vendorItemId=456")
+        val second = target(2, "https://www.coupang.com/vp/products/123?itemId=790&vendorItemId=457")
+        assertEquals(listOf(first, second), CartBatchValidation.prepare(listOf(first, second)))
     }
 
     @Test fun sharedLinkIsDeferredByDirectValidationButUnresolvedPreparationNamesTheProduct() {

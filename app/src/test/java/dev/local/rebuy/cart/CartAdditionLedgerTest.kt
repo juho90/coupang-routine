@@ -97,7 +97,7 @@ class CartAdditionLedgerTest {
         val other = url.replace("vendorItemId=444", "vendorItemId=445")
         assertTrue(ledger.claim(url, "first"))
         assertTrue(ledger.claim(other, "other"))
-        assertFalse(ledger.clear("https://www.coupang.com/vp/products/123456"))
+        assertTrue(ledger.clear("https://www.coupang.com/vp/products/123456"))
         assertNotNull(ledger.lookup(url))
         assertTrue(ledger.clear(url))
         assertNull(ledger.lookup(url))
@@ -127,7 +127,7 @@ class CartAdditionLedgerTest {
         val original = preferences.getString(key, null)!!
         val invalidRecords = listOf(
             "broken-json",
-            JSONObject(original).put("version", 2).toString(),
+            JSONObject(original).put("version", 3).toString(),
             JSONObject(original).put("status", "UNRECOGNIZED").toString(),
             JSONObject(original).put("atEpochMillis", "100").toString(),
             JSONObject(original).put("atEpochMillis", -1).toString(),
@@ -155,9 +155,9 @@ class CartAdditionLedgerTest {
         assertNull(ledger.lookup(url))
     }
 
-    @Test fun baseProductLinksAndInvalidAttemptIdsCannotClaim() {
+    @Test fun partialLinksAndInvalidAttemptIdsCannotClaim() {
         val ledger = CartAdditionLedger(context)
-        for (invalid in listOf("https://www.coupang.com/vp/products/123456", "https://www.coupang.com/vp/products/123456?itemId=333", "https://link.coupang.com/a/example")) {
+        for (invalid in listOf("https://www.coupang.com/vp/products/123456?itemId=333", "https://link.coupang.com/a/example")) {
             expectInvalid { ledger.lookup(invalid) }
             expectInvalid { ledger.claim(invalid, "attempt") }
             assertFalse(ledger.clear(invalid))

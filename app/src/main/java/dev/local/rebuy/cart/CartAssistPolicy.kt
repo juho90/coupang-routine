@@ -105,10 +105,17 @@ internal object CartAssistPolicy {
         val targetIndex: Int?,
     )
 
-    fun inspectCartTarget(nodes: List<Node>, expectedTitle: String, expectedOption: String): DetailInspection =
-        inspectDetailTarget(nodes, expectedTitle, expectedOption, "장바구니담기")
+    fun inspectCartTarget(nodes: List<Node>, expectedTitle: String, expectedOption: String, requirePrimaryOption: Boolean = false): DetailInspection =
+        inspectDetailTarget(nodes, expectedTitle, expectedOption, "장바구니담기", requirePrimaryOption)
 
-    private fun inspectDetailTarget(nodes: List<Node>, expectedTitle: String, expectedOption: String, targetText: String): DetailInspection {
+    fun primaryTitleNode(nodes: List<Node>): Node? = nodes.filter { node ->
+        node.visible && node.childCount == 0 && node.resourceId == PREFIX + "name_text" &&
+            PREFIX + "name_layout" in node.ancestorIds && node.ancestorIds.any { it in DETAIL_CONTENT_IDS } &&
+            node.ancestorIds.none { it.contains("recommend", ignoreCase = true) || it.contains("ranking", ignoreCase = true) } &&
+            normalize(node.text).length >= 4
+    }.singleOrNull()
+
+    private fun inspectDetailTarget(nodes: List<Node>, expectedTitle: String, expectedOption: String, targetText: String, requirePrimaryOption: Boolean = false): DetailInspection {
         val detailScreen = isDetailScreen(nodes)
         val title = normalize(expectedTitle)
         val option = normalizeOption(expectedOption)
@@ -117,18 +124,20 @@ internal object CartAssistPolicy {
             node.visible && node.ancestorIds.any { it in DETAIL_CONTENT_IDS } &&
                 node.ancestorIds.none { it.contains("recommend", ignoreCase = true) }
         }
-        val matchedTitles = content.filter { normalize(it.text) == title }
+        val matchedTitles = if (requirePrimaryOption)
+            listOfNotNull(primaryTitleNode(nodes)).filter { normalize(it.text) == title }
+        else content.filter { normalize(it.text) == title }
         val titleMatched = title.length >= 4 && matchedTitles.isNotEmpty()
-        val optionMatched = option.length >= 2 && (content.any {
+        val optionMatched = option.length >= 2 && ((!requirePrimaryOption && content.any {
             normalizeOption(it.text.trim().removePrefix("옵션")).removePrefix("옵션") == option
-        } || (titleMatched && matchedTitles.any { optionInMatchedTitle(it.text, option) }))
+        }) || (titleMatched && matchedTitles.any { optionInMatchedTitle(it.text, option) }))
         val buttonIndex = if (detailScreen) strictButtonIndex(nodes, targetText) else null
         return DetailInspection(detailScreen, titleMatched, optionMatched, buttonIndex != null,
             buttonIndex?.takeIf { titleMatched && optionMatched })
     }
 
     private val titlePackSuffix = Regex(
-        ",\\s*($NUMBER\\s*(?:밀리리터|킬로그램|밀리그램|리터|그램|kg|mg|ml|g|l)" +
+        ",\\s*($NUMBER\\s*(?:밀리리터|킬로그램|밀리그램|리터|그램|kg|mg|ml|g|l|구|개입|입|캔)" +
             "(?:\\s*내외)?\\s*,\\s*$NUMBER\\s*(?:개|팩|봉|병|세트|묶음))\\s*$",
         RegexOption.IGNORE_CASE,
     )

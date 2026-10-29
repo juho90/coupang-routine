@@ -54,13 +54,14 @@ object ProductTextParser {
     private val totalPriceLabel = Regex("(?:총\\s*(?:결제\\s*)?(?:금액|가격)?|결제\\s*금액|판매가|할인가|쿠폰가|와우가|상품가)\\s*[:：]?\\s*$")
     private val excludedTitle = Regex(
         "(?:도착\\s*(?:보장|예정)|무료\\s*(?:배송|반품)|배송비|배달비|할부|적립|캐시백|" +
-            "장바구니|구매하기|바로\\s*구매|상품평|리뷰|옵션을?\\s*선택|선택해\\s*주세요|" +
+            "위시리스트|공유하기|장바구니|구매하기|바로\\s*구매|구매\\s*[0-9,]+\\s*위(?:\\s|$)|상품평|리뷰|옵션을?\\s*선택|선택해\\s*주세요|" +
             "쿠폰\\s*(?:받기|적용)|다시\\s*구매|함께\\s*본\\s*상품|품절|" +
             "브랜드\\s*(?:상품\\s*)?모아\\s*보기|브랜드\\s*(?:스토어|관)|" +
             "배송하고|판매합니다|판매하는\\s*상품|배송\\s*(?:안내|정보|방법)|" +
-            "[0-9,]+\\s*명(?:이|\\s*이상)?\\s*구매)",
+            "[0-9,]+(?:만|천)?\\s*명(?:이|\\s*이상)?\\s*구매)",
     )
     private val metadataLine = Regex("^(?:원산지|제조국|생산국|제조사|제조원|판매자|판매처|평점|고객\\s*평가)(?:\\s*[:：]|\\s+|$)")
+    private val originLine = Regex("^원산지\\s*[:：]")
     private val brandPrompt = Regex("브랜드\\s*(?:상품\\s*)?모아\\s*보기")
     private val optionPrompt = Regex("(?:옵션을?\\s*선택|선택해\\s*주세요)")
     private val identifierLabel = Regex("^(?:상품\\s*(?:번호|코드)|itemId|vendorItemId|productId|pId)\\s*[:：]?\\s*[0-9]", RegexOption.IGNORE_CASE)
@@ -108,8 +109,17 @@ object ProductTextParser {
             if (option != null && options.size < MAX_CANDIDATES) options += option
             if (isTitle(line, option, amounts.isNotEmpty())) titles.putIfAbsent(line, lineIndex)
         }
+        // The title directly above the detail origin field is stronger evidence than
+        // text length or other ranking hints. Preserve that evidence even when an OCR
+        // image repeated the same title earlier. Conflicting anchors stay unconfirmed.
+        val primaryTitle = boundedLines.indices.asSequence()
+            .filter { it > 0 && originLine.containsMatchIn(boundedLines[it]) }
+            .map { boundedLines[it - 1] }
+            .filter(titles::containsKey).distinct().toList().singleOrNull()
         return ProductTextSuggestions(
             titles.entries.sortedWith(compareByDescending<Map.Entry<String, Int>> {
+                it.key == primaryTitle
+            }.thenByDescending {
                 titleScore(it.key, it.value, boundedLines)
             }.thenBy { it.value }).take(MAX_CANDIDATES).map { it.key },
             options.take(MAX_CANDIDATES), prices.toList(), urls.toList(),

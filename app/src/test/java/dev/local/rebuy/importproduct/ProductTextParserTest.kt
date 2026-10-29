@@ -4,6 +4,35 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ProductTextParserTest {
+    @Test fun eggDetailUsesTitleImmediatelyBeforeOriginInsteadOfCategoryRank() {
+        val title = "곰곰 촉촉 반숙란 (냉장), 15구, 1개"
+        val result = ProductTextParser.parse(listOf(
+            "구운계란/훈제란 구매 2위", "한 달간 30만명 이상 구매했어요",
+            title, "원산지: 상품 상세설명 참조", "15구, 1개", "8,990원",
+        ))
+        assertEquals(listOf(title), result.titleCandidates)
+        assertEquals(listOf("15구, 1개"), result.optionCandidates)
+        assertFalse(result.titleCandidates.any { it.contains("구매 2위") })
+    }
+
+    @Test fun uniqueOriginAnchorOutranksLongerTextEvenWhenTitleWasSeenEarlier() {
+        val title = "곰곰 촉촉 반숙란"
+        val longer = "아주 길고 상세하게 적힌 계란 포장 내용과 보관 방법을 포함하는 다른 문구"
+        val result = ProductTextParser.parse(listOf(
+            title, longer, "제조사: 포장업체", title, "원산지： 상품 상세설명 참조",
+        ))
+        assertEquals(title, result.titleCandidates.first())
+        assertTrue(result.titleCandidates.contains(longer))
+    }
+
+    @Test fun rankAndMetadataNeverBecomeTitlesThroughAnOriginAnchor() {
+        val result = ProductTextParser.parse(listOf(
+            "구운계란/훈제란 구매 2위", "원산지: 상품 상세설명 참조",
+            "판매자: 계란 판매처", "원산지: 상품 상세설명 참조", "곰곰 촉촉 반숙란",
+        ))
+        assertEquals(listOf("곰곰 촉촉 반숙란"), result.titleCandidates)
+    }
+
     @Test fun wideCoupangScreenshotPrefersFullProductTitleAndCompleteLabeledOption() {
         val title = "동원 용기죽 4종 기획세트 쇠고기3+야채3+참치3+전복3"
         val result = ProductTextParser.parse(listOf(

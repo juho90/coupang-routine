@@ -10,6 +10,12 @@ import dev.local.rebuy.reminders.ReminderScheduler
 import dev.local.rebuy.settings.SettingsRepository
 import dev.local.rebuy.autobuy.AutoBuyStore
 import dev.local.rebuy.autobuy.AutoBuyScheduler
+import dev.local.rebuy.cart.CartAdditionLedger
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 
 class RebuyApplication : Application() {
     val container: AppContainer by lazy { AppContainer(this) }
@@ -31,4 +37,11 @@ class AppContainer(context: Context) {
     val scheduler = ReminderScheduler(context.applicationContext, repository, settings)
     val autoBuyStore = AutoBuyStore(context.applicationContext)
     val autoBuyScheduler = AutoBuyScheduler(context.applicationContext)
+
+    init {
+        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+            val knownUrls = repository.items.first().map { it.productUrl } + purchaseLogs.logs.first().map { it.productUrl }
+            CartAdditionLedger(context).migrateKnownUrls(knownUrls)
+        }
+    }
 }

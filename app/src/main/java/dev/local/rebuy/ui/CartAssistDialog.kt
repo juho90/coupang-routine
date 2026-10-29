@@ -92,7 +92,7 @@ internal fun CartAssistDialog(
 
     fun refreshReceipt() {
         receiptReadFailed = false
-        receipt = if (runCatching { CoupangCartProductLink.parseExactOption(url) }.isSuccess)
+        receipt = if (runCatching { CoupangCartProductLink.parseForCart(url) }.isSuccess)
             runCatching { CartAdditionLedger(context).lookup(url) }.getOrElse {
                 receiptReadFailed = true
                 error = "이전 담기 기록을 읽지 못했습니다. 담기는 시작 시 다시 검사하며 기록을 읽지 못하면 중단합니다."
@@ -201,11 +201,14 @@ internal fun CartAssistDialog(
                         Text(url.ifBlank { "상품 링크 필요" }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
+                if (runCatching { CoupangCartProductLink.parseForCart(url).itemId == null }.getOrDefault(false)) {
+                    Text("옵션 번호가 없는 링크입니다. 쿠팡 본문의 상품명과 선택 규격이 모두 일치할 때만 담습니다.", style = MaterialTheme.typography.bodySmall)
+                }
                 Text("앱의 이전 담기 요청 기록이 있으면 같은 옵션을 다시 담지 않습니다. 쿠팡에서 직접 담은 상품은 확인할 수 없으니 장바구니를 함께 확인해 주세요.", style = MaterialTheme.typography.bodySmall)
                 Text("수량 1개를 담습니다. 등록 한도가 있으면 화면의 상품가를 비교하고, 초과하거나 가격이 불명확하면 담지 않습니다. 배송비·최종 결제 금액은 검증하지 않으며 주문·결제·구매 완료 기록을 실행하지 않습니다.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 maxTotalWon?.let { Text("상품가 비교 한도 ${java.text.NumberFormat.getIntegerInstance(java.util.Locale.KOREA).format(it)}원", style = MaterialTheme.typography.labelLarge) }
                 receipt?.let { previous ->
-                    Text(if (previous.status == CartAdditionLedger.Status.CONFIRMED) "이 옵션의 담기 완료 기록이 있어 재추가를 막고 있습니다." else "이 옵션의 이전 담기 요청 결과를 확인해야 합니다. 재추가를 막고 있습니다.", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodySmall)
+                    Text(if (previous.status == CartAdditionLedger.Status.CONFIRMED) "이 상품의 담기 완료 기록이 있어 재추가를 막고 있습니다." else "이 상품의 이전 담기 요청 결과를 확인해야 합니다. 재추가를 막고 있습니다.", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodySmall)
                 }
                 if (receipt != null || receiptReadFailed) TextButton(onClick = { error = null; showReceiptReset = true }, enabled = !busy, modifier = Modifier.testTag("cart-record-reset")) { Text("장바구니 확인 후 기록 해제") }
                 if (quantity != 1) Text(
@@ -350,10 +353,13 @@ internal fun CartAssistDialog(
         confirmButton = {
             TextButton(onClick = {
                 if (CartAssistController.clearRecordedAddition(context, url)) {
-                    receipt = null
-                    receiptReadFailed = false
                     ownsAttempt = false
-                    error = null
+                    refreshReceipt()
+                    error = when {
+                        receiptReadFailed -> "남아 있는 담기 기록을 확인하지 못했습니다. 담기는 계속 차단됩니다."
+                        receipt != null -> "같은 상품의 다른 링크로 남은 담기 기록이 있습니다. 해당 링크의 담기 창에서 확인 후 해제해 주세요."
+                        else -> null
+                    }
                     showReceiptReset = false
                 } else error = "기록을 해제하지 못했습니다. 실행 중인 도우미를 닫고 다시 시도해 주세요."
             }, enabled = !busy, modifier = Modifier.testTag("cart-record-clear-confirm")) { Text("확인했어요 · 기록 해제") }

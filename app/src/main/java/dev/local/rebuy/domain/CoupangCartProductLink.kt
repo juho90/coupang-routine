@@ -4,7 +4,7 @@ import java.net.URI
 import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
 
-/** Observed product address. Exact cart actions require both option IDs; missing IDs are never inferred. */
+/** Observed product address. Missing option IDs are never inferred. */
 data class CoupangCartProductLink private constructor(
     val canonicalUrl: String,
     val nativeUri: String,
@@ -31,6 +31,12 @@ data class CoupangCartProductLink private constructor(
         fun parseExactOption(raw: String): CoupangCartProductLink = parse(raw).also {
             require(it.itemId != null && it.vendorItemId != null) {
                 EXACT_OPTION_REQUIRED_MESSAGE
+            }
+        }
+
+        fun parseForCart(raw: String): CoupangCartProductLink = parse(raw).also {
+            require((it.itemId == null) == (it.vendorItemId == null)) {
+                "상품 링크의 옵션 정보가 일부만 있습니다. 쿠팡에서 상품 링크를 다시 복사해 주세요."
             }
         }
 

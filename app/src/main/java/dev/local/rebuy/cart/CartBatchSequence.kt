@@ -25,8 +25,8 @@ internal object CartBatchValidation {
 
     fun directLinkProblem(target: CartBatchTarget): String? {
         val product = runCatching { CoupangCartProductLink.parse(target.productUrl) }.getOrNull() ?: return null
-        if (product.itemId != null && product.vendorItemId != null) return null
-        return namedLinkProblem(target, CoupangCartProductLink.EXACT_OPTION_REQUIRED_MESSAGE)
+        return runCatching { CoupangCartProductLink.parseForCart(product.canonicalUrl) }
+            .exceptionOrNull()?.let { namedLinkProblem(target, it.message ?: "상품 링크를 확인해 주세요.") }
     }
     fun prepare(targets: List<CartBatchTarget>): List<CartBatchTarget> {
         require(targets.size in 1..MAX_TARGETS) { "한 번에 등록 상품 1~20개를 담을 수 있습니다." }
@@ -37,7 +37,7 @@ internal object CartBatchValidation {
             require(item.title.length <= 250 && CartAssistPolicy.normalize(item.title).length >= 4) { "상품명을 확인해 주세요." }
             require(item.option.length <= 120 && CartAssistPolicy.normalizeOption(item.option).length >= 2) { "구매 옵션을 확인해 주세요." }
             val product = try {
-                CoupangCartProductLink.parseExactOption(item.productUrl)
+                CoupangCartProductLink.parseForCart(item.productUrl)
             } catch (invalid: IllegalArgumentException) {
                 throw IllegalArgumentException(namedLinkProblem(item, invalid.message ?: "상품 링크를 확인해 주세요."), invalid)
             }
@@ -48,6 +48,10 @@ internal object CartBatchValidation {
         require(prepared.distinctBy { CartAssistPolicy.normalize(it.title) to CartAssistPolicy.normalizeOption(it.option) }.size == prepared.size) {
             "같은 상품명·옵션이 중복되어 구분할 수 없습니다. 중복을 정리해 주세요."
         }
+        val byProduct = prepared.groupBy { CoupangCartProductLink.parseForCart(it.productUrl).productId }
+        require(byProduct.values.none { group -> group.size > 1 && group.any {
+            CoupangCartProductLink.parseForCart(it.productUrl).itemId == null
+        } }) { "옵션 번호 없는 링크와 같은 상품이 함께 선택됐습니다. 중복을 정리해 주세요." }
         return prepared.toList()
     }
 }

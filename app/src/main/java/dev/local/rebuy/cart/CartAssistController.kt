@@ -164,13 +164,13 @@ object CartAssistController {
         check(Looper.myLooper() == Looper.getMainLooper())
         if (session != null || AutoBuyController.isActive() || ProductLinkImportController.isActive()) return false
         appContext = context.applicationContext
-        if (!validRequest(request)) return reject("상품의 정확한 옵션 주소와 상품명·옵션·한도를 확인해 주세요.")
+        if (!validRequest(request)) return reject("상품 링크와 상품명·선택 규격·금액 한도를 확인해 주세요.")
         if (!request.verifyOnly) {
             val previous = try { CartAdditionLedger(context).lookup(request.productUrl) }
             catch (_: Exception) { return reject("이전 담기 기록을 읽지 못해 중복 추가를 막았습니다. 기록을 확인해 주세요.") }
             if (previous != null) return reject(if (previous.status == CartAdditionLedger.Status.CONFIRMED)
-                "이 옵션은 앱에서 담기 완료를 확인한 기록이 있습니다. 쿠팡 장바구니를 확인한 뒤 기록을 해제해야 다시 담을 수 있습니다."
-                else "이 옵션은 이전 담기 요청의 결과 확인이 필요합니다. 쿠팡 장바구니를 확인한 뒤 기록을 해제해 주세요.")
+                "이 상품은 앱에서 담기 완료를 확인한 기록이 있습니다. 쿠팡 장바구니를 확인한 뒤 기록을 해제해야 다시 담을 수 있습니다."
+                else "이 상품은 이전 담기 요청의 결과 확인이 필요합니다. 쿠팡 장바구니를 확인한 뒤 기록을 해제해 주세요.")
         }
         if (!isEnabled(context)) {
             return reject("접근성 설정에서 다시담기 장바구니 도우미를 직접 켠 뒤 다시 시도해 주세요.")
@@ -407,7 +407,7 @@ object CartAssistController {
 
     internal fun validRequest(request: CartAssistRequest): Boolean = runCatching {
         if (request.verifyOnly) CoupangCartProductLink.parse(request.productUrl)
-        else CoupangCartProductLink.parseExactOption(request.productUrl)
+        else CoupangCartProductLink.parseForCart(request.productUrl)
         require(request.maxTotalWon == null || request.maxTotalWon in 1L..100_000_000L)
         CartAssistPolicy.normalize(request.expectedTitle).length >= 4 &&
             CartAssistPolicy.normalizeOption(request.expectedOption).length >= 2 &&
