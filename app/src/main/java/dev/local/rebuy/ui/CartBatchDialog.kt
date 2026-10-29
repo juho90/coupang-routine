@@ -131,7 +131,6 @@ internal fun CartBatchDialog(items: List<RoutineItem>, today: Long, onPreparingC
             linkProblems.isNotEmpty() -> linkProblems.values.joinToString("\n") + "\n이번 묶음 담기는 시작하지 않았습니다."
             CartAssistController.state.value is CartAssistState.Running || AutoBuyController.isActive() ->
                 "다른 구매 도우미가 실행 중입니다. 실행을 마친 뒤 다시 시작해 주세요."
-            !CartAssistController.isEnabled(context) -> "Android 접근성 설정에서 다시담기 구매 도우미를 켜 주세요."
             else -> null
         }
         if (error != null) return
@@ -171,8 +170,8 @@ internal fun CartBatchDialog(items: List<RoutineItem>, today: Long, onPreparingC
                 if (scope == CartBatchScope.DUE && !batch.running && !hasStarted && targets.isEmpty()) {
                     Text("오늘까지 구매 예정인 상품이 없습니다. 미리 담으려면 ‘전체 활성’을 선택해 주세요.", style = MaterialTheme.typography.bodySmall)
                 }
-                Text("한 번에 최대 20개 상품을 각각 1개씩 담습니다. 같은 옵션의 앱 담기 기록이 있으면 재추가를 막고 멈춥니다. 직접 담은 상품은 알 수 없으므로 실제 장바구니도 확인해 주세요.", style = MaterialTheme.typography.bodySmall)
-                Text("한도가 있는 상품은 담기 전 화면의 상품가를 비교합니다. 초과·가격 불명확·담기 실패 시 나머지는 멈춥니다. 배송비·최종 결제 금액은 별도이며 주문·결제·구매 완료 기록은 실행하지 않습니다.", style = MaterialTheme.typography.bodySmall)
+                Text("한 번에 최대 20개 상품을 각각 1개씩 담습니다. 담기 완료 기록이 있는 상품은 건너뛰며, 이전 요청 결과가 불확실한 상품은 확인 필요로 표시하고 재추가하지 않습니다. 직접 담은 상품은 알 수 없으므로 실제 장바구니도 확인해 주세요.", style = MaterialTheme.typography.bodySmall)
+                Text("한도가 있는 상품은 담기 전 화면의 상품가를 비교합니다. 판매 불가 상품은 실패로 표시하고 다음 상품을 확인합니다. 한도 초과·가격 불명확·그 밖의 담기 실패 시에는 나머지를 멈춥니다. 배송비·최종 결제 금액은 별도이며 주문·결제·구매 완료 기록은 실행하지 않습니다.", style = MaterialTheme.typography.bodySmall)
                 if (inactiveCount > 0) Text("대상에서 제외: 비활성 ${inactiveCount}개", style = MaterialTheme.typography.bodySmall)
                 if (preparing) {
                     LinearProgressIndicator(Modifier.fillMaxWidth())
@@ -204,7 +203,8 @@ internal fun CartBatchDialog(items: List<RoutineItem>, today: Long, onPreparingC
                 }
                 if (batch.running || hasStarted) {
                     if (batch.running) LinearProgressIndicator(Modifier.fillMaxWidth())
-                    Text("담기 완료 ${batch.addedCount} / ${batch.totalCount}", fontWeight = FontWeight.SemiBold)
+                    Text("새로 담음 ${batch.addedCount}개 · 대상 ${batch.totalCount}개", fontWeight = FontWeight.SemiBold)
+                    Text("기록 있어 건너뜀 ${batch.skippedCount}개 · 확인 필요 ${batch.reviewCount}개 · 실패 ${batch.failedCount}개", style = MaterialTheme.typography.bodySmall)
                     if (batch.message.isNotBlank()) Text(batch.message)
                     batch.entries.forEach { entry ->
                         Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
@@ -213,10 +213,12 @@ internal fun CartBatchDialog(items: List<RoutineItem>, today: Long, onPreparingC
                                 CartBatchEntryStatus.PENDING -> "대기"
                                 CartBatchEntryStatus.RUNNING -> "확인·담기 진행 중"
                                 CartBatchEntryStatus.ADDED -> "담기 완료 안내 확인"
+                                CartBatchEntryStatus.SKIPPED -> "기록 있어 건너뜀 · ${entry.message}"
+                                CartBatchEntryStatus.REVIEW_REQUIRED -> "확인 필요 · ${entry.message}"
                                 CartBatchEntryStatus.FAILED -> "실패 · ${entry.message}"
                                 CartBatchEntryStatus.NOT_RUN -> "실행하지 않음 · ${entry.message}"
                             }, style = MaterialTheme.typography.bodySmall,
-                                color = if (entry.status == CartBatchEntryStatus.FAILED) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
+                                color = if (entry.status in setOf(CartBatchEntryStatus.FAILED, CartBatchEntryStatus.REVIEW_REQUIRED)) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
                 } else {
@@ -234,7 +236,7 @@ internal fun CartBatchDialog(items: List<RoutineItem>, today: Long, onPreparingC
                             }
                         }
                     }
-                    if (batch.entries.isNotEmpty()) Text("지난 실행: ${batch.addedCount}/${batch.totalCount}개 완료 · ${batch.message}", style = MaterialTheme.typography.bodySmall)
+                    if (batch.entries.isNotEmpty()) Text("지난 실행: 새로 담음 ${batch.addedCount}개 · 기록 있어 건너뜀 ${batch.skippedCount}개 · 확인 필요 ${batch.reviewCount}개 · 실패 ${batch.failedCount}개 · ${batch.message}", style = MaterialTheme.typography.bodySmall)
                 }
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
                 if (!CartAssistController.isEnabled(context) && !batch.running && !preparing) {
@@ -249,7 +251,7 @@ internal fun CartBatchDialog(items: List<RoutineItem>, today: Long, onPreparingC
             when {
                 batch.running -> TextButton(onClick = { CartBatchController.cancel() }, modifier = Modifier.testTag("cart-batch-cancel")) { Text("실행 중단") }
                 preparing -> TextButton(onClick = { stopPreparation("상품 주소 확인을 중단했습니다.") }) { Text("주소 확인 중단") }
-                !hasStarted -> Button(onClick = ::begin, enabled = targets.isNotEmpty() && targets.size <= 20 && invalid.isEmpty(), modifier = Modifier.testTag("cart-batch-start")) { Text("${targets.size}개 상품 담기") }
+                !hasStarted -> Button(onClick = ::begin, enabled = targets.isNotEmpty() && targets.size <= 20 && invalid.isEmpty(), modifier = Modifier.testTag("cart-batch-start")) { Text("${targets.size}개 확인 후 담기") }
                 else -> Unit
             }
         },

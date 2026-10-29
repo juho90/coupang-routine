@@ -52,25 +52,24 @@ object CartBatchController {
             mutableState.value = CartBatchState(message = "상품 주소·상품명·옵션을 확인해 주세요.")
             return false
         }
-        val hasRecordedAddition = try {
-            prepared.any { CartAdditionLedger(context).lookup(it.productUrl) != null }
-        } catch (_: Exception) {
-            mutableState.value = CartBatchState(message = "이전 담기 기록을 읽지 못해 시작하지 않았습니다.")
-            return false
-        }
-        if (hasRecordedAddition) {
-            mutableState.value = CartBatchState(message = "이전 담기 요청 기록이 있는 옵션이 포함되어 시작하지 않았습니다. 각 상품의 장바구니 담기 화면에서 결과를 확인한 뒤 기록을 해제해 주세요.")
+        val entries = prepared.map { target -> recordedEntry(context, target) ?: CartBatchEntry(target) }
+        val pendingCount = entries.count { it.status == CartBatchEntryStatus.PENDING }
+        if (pendingCount > 0 && !CartAssistController.isEnabled(context)) {
+            mutableState.value = CartBatchState(entries, message = "Android 접근성 설정에서 다시담기 구매 도우미를 켜 주세요.")
             return false
         }
         cancelled = false
-        val initial = CartBatchState(prepared.map(::CartBatchEntry), running = true, message = "여러 상품 담기를 준비하고 있습니다.")
+        val initial = CartBatchState(entries, running = pendingCount > 0,
+            message = if (pendingCount > 0) "새로 담을 ${pendingCount}개 상품을 준비하고 있습니다. 기존 담기 기록은 건너뜁니다."
+                else "새로 담을 상품이 없습니다. 담기 기록 ${entries.count { it.status == CartBatchEntryStatus.SKIPPED }}개 · 확인 필요 ${entries.count { it.status == CartBatchEntryStatus.REVIEW_REQUIRED }}개")
         if (!publish(initial)) {
             mutableState.value = initial.copy(running = false, message = "진행 기록을 저장하지 못해 시작하지 않았습니다.")
             return false
         }
+        if (pendingCount == 0) return true
         val nextJob = scope.launch(start = CoroutineStart.LAZY) {
             try {
-                val finished = CartBatchSequence.run(prepared, ::execute, ::publish) { cancelled }
+                val finished = CartBatchSequence.run(prepared, ::execute, ::publish, isCancelled = { cancelled }, initialEntries = entries)
                 if (!publish(finished)) mutableState.value = finished.copy(message = finished.message + " 결과 기록 저장은 실패했습니다.")
             } catch (_: CancellationException) {
                 publish(CartBatchSequence.interrupted(mutableState.value))
@@ -107,7 +106,7 @@ object CartBatchController {
             val raw = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY, null) ?: return
             require(raw.length <= 150_000)
             val json = JSONObject(raw)
-            migrated = json.getInt("version") == 1
+            migrated = json.getInt("version") in 1..2
             decode(CartBatchSnapshotMigration.toCurrent(json))
         }.getOrNull() ?: return
         val restoredState = if (snapshot.running) CartBatchSequence.interrupted(snapshot) else snapshot
@@ -115,8 +114,24 @@ object CartBatchController {
         if (snapshot.running || migrated) persist(restoredState)
     }
 
+    private fun recordedEntry(context: Context, target: CartBatchTarget): CartBatchEntry? = try {
+        when (CartAdditionLedger(context).lookup(target.productUrl)?.status) {
+            CartAdditionLedger.Status.CONFIRMED -> CartBatchEntry(target, CartBatchEntryStatus.SKIPPED,
+                "앱의 담기 완료 기록이 있어 건너뛰었습니다. 현재 장바구니를 조회한 결과는 아닙니다.")
+            CartAdditionLedger.Status.CLAIMED -> CartBatchEntry(target, CartBatchEntryStatus.REVIEW_REQUIRED,
+                "이전 담기 요청 결과를 장바구니에서 확인해야 합니다. 재추가하지 않았습니다.")
+            null -> null
+        }
+    } catch (_: Exception) {
+        CartBatchEntry(target, CartBatchEntryStatus.REVIEW_REQUIRED,
+            "이전 담기 기록을 읽지 못해 이 상품은 담지 않았습니다. 장바구니와 담기 기록을 확인해 주세요.")
+    }
+
     private suspend fun execute(target: CartBatchTarget): CartBatchAttemptResult {
         if (cancelled) return CartBatchAttemptResult(false, "사용자가 중지했습니다.")
+        recordedEntry(requireNotNull(context), target)?.let {
+            return CartBatchAttemptResult(false, it.message, skipStatus = it.status)
+        }
         return try {
             val started = CartAssistController.start(requireNotNull(context), CartAssistRequest(target.productUrl, target.title, target.option, maxTotalWon = target.maxTotalWon))
             ownsChild = started
@@ -126,7 +141,9 @@ object CartBatchController {
                 val result = withTimeout(50_000) {
                     CartAssistController.state.first { it is CartAssistState.Finished } as CartAssistState.Finished
                 }
-                CartBatchAttemptResult(result.success, result.message, result.verifiedOnly)
+                val canContinue = result.unavailable && !result.success && !result.verifiedOnly &&
+                    runCatching { CartAdditionLedger(requireNotNull(context)).lookup(target.productUrl) == null }.getOrDefault(false)
+                CartBatchAttemptResult(result.success, result.message, result.verifiedOnly, continueAfterFailure = canContinue)
             }
         } catch (_: TimeoutCancellationException) {
             CartBatchAttemptResult(false, "상품의 담기 결과 대기 시간이 초과됐습니다. 장바구니를 확인해 주세요.")
@@ -147,7 +164,7 @@ object CartBatchController {
     }.getOrDefault(false)
 
     private fun encode(snapshot: CartBatchState): String = JSONObject().apply {
-        put("version", 2); put("running", snapshot.running); put("message", snapshot.message); put("interrupted", snapshot.interrupted)
+        put("version", 3); put("running", snapshot.running); put("message", snapshot.message); put("interrupted", snapshot.interrupted)
         put("entries", JSONArray().apply {
             snapshot.entries.forEach { entry ->
                 put(JSONObject().apply {

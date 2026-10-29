@@ -87,6 +87,14 @@ class CartAssistService : AccessibilityService() {
                 CartAssistController.reportStage(current, CartAssistStage.OPENING_PRODUCT)
                 return
             }
+            if (!scan.truncated && CartAssistPolicy.isUnavailableProduct(nodes)) {
+                if (current.unavailableSeenAt == 0L) current.unavailableSeenAt = now
+                else if (now - current.unavailableSeenAt >= 500) {
+                    CartAssistController.finish("현재 판매 중인 상품이 아닙니다. 담기 버튼은 누르지 않았습니다.", false, unavailable = true)
+                }
+                return
+            }
+            current.unavailableSeenAt = 0L
             val requirePrimaryOption = dev.local.rebuy.domain.CoupangCartProductLink.parse(current.request.productUrl).itemId == null
             if (requirePrimaryOption && scan.truncated) {
                 CartAssistController.finish("상품 화면을 끝까지 확인하지 못해 담기를 중지했습니다.", false)

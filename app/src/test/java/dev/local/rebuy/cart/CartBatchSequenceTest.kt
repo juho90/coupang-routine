@@ -89,4 +89,114 @@ class CartBatchSequenceTest {
         assertTrue(result.interrupted)
         assertEquals(listOf(CartBatchEntryStatus.ADDED, CartBatchEntryStatus.FAILED, CartBatchEntryStatus.NOT_RUN), result.entries.map { it.status })
     }
+
+    @Test fun confirmedAndUncertainReceiptsAreSkippedWithoutCountingAsNewAdditions() = runTest {
+        val targets = listOf(target(1), target(2), target(3))
+        val initial = listOf(
+            CartBatchEntry(targets[0], CartBatchEntryStatus.SKIPPED, "confirmed receipt"),
+            CartBatchEntry(targets[1], CartBatchEntryStatus.REVIEW_REQUIRED, "uncertain receipt"),
+            CartBatchEntry(targets[2]),
+        )
+        val started = mutableListOf<String>()
+        val published = mutableListOf<CartBatchState>()
+        val result = CartBatchSequence.run(targets, {
+            started += it.itemId
+            CartBatchAttemptResult(true, "confirmed")
+        }, { published += it; true }, { false }, initial)
+        assertEquals(listOf(targets[2].itemId), started)
+        assertEquals(listOf(CartBatchEntryStatus.SKIPPED, CartBatchEntryStatus.REVIEW_REQUIRED, CartBatchEntryStatus.ADDED), result.entries.map { it.status })
+        assertEquals(1, result.addedCount)
+        assertEquals(1, result.skippedCount)
+        assertEquals(1, result.reviewCount)
+        assertEquals(initial.take(2), result.entries.take(2))
+        assertFalse(result.running)
+        assertTrue(published.all { it.entries.take(2) == initial.take(2) })
+    }
+
+    @Test fun allRecordedTargetsPublishOnceAndNeverLaunchIncludingCancellationAndWriteFailure() = runTest {
+        val targets = listOf(target(1), target(2))
+        val initial = targets.map { CartBatchEntry(it, CartBatchEntryStatus.SKIPPED, "old receipt") }
+        for (cancelled in listOf(false, true)) {
+            for (writeSucceeds in listOf(false, true)) {
+                val published = mutableListOf<CartBatchState>()
+                val result = CartBatchSequence.run(targets, { fail("No recorded target may launch"); error("unreachable") },
+                    { published += it; writeSucceeds }, { cancelled }, initial)
+                assertEquals(1, published.size)
+                assertFalse(published.single().running)
+                assertFalse(result.running)
+                assertEquals(initial, result.entries)
+                assertEquals(0, result.addedCount)
+                if (!writeSucceeds) assertTrue(result.message.contains("저장하지 못했습니다"))
+                else if (cancelled) assertTrue(result.message.contains("중지"))
+            }
+        }
+    }
+
+    @Test fun receiptFoundJustBeforeExecutionIsPersistedAndLaterTargetStillRuns() = runTest {
+        val targets = listOf(target(1), target(2))
+        val started = mutableListOf<String>()
+        val published = mutableListOf<CartBatchState>()
+        val result = CartBatchSequence.run(targets, {
+            started += it.itemId
+            if (it == targets.first()) CartBatchAttemptResult(false, "newly found receipt", skipStatus = CartBatchEntryStatus.REVIEW_REQUIRED)
+            else CartBatchAttemptResult(true, "confirmed")
+        }, { published += it; true }, { false })
+        assertEquals(targets.map { it.itemId }, started)
+        assertEquals(1, result.addedCount)
+        assertEquals(1, result.reviewCount)
+        assertTrue(published.any { it.entries.first().status == CartBatchEntryStatus.REVIEW_REQUIRED && it.entries.last().status == CartBatchEntryStatus.PENDING })
+    }
+
+    @Test fun onlyExplicitUnavailableFailureContinuesAndIsNeverCountedAsAdded() = runTest {
+        val targets = listOf(target(1), target(2))
+        val executed = mutableListOf<String>()
+        val result = CartBatchSequence.run(targets, {
+            executed += it.itemId
+            if (it == targets.first()) CartBatchAttemptResult(false, "unavailable", continueAfterFailure = true)
+            else CartBatchAttemptResult(true, "confirmed")
+        }, { true }, { false })
+        assertEquals(targets.map { it.itemId }, executed)
+        assertEquals(listOf(CartBatchEntryStatus.FAILED, CartBatchEntryStatus.ADDED), result.entries.map { it.status })
+        assertEquals(1, result.failedCount)
+        assertEquals(1, result.addedCount)
+        assertTrue(result.message.contains("실패 1개"))
+        val verified = CartBatchSequence.run(targets, {
+            CartBatchAttemptResult(false, "read only", verifiedOnly = true, continueAfterFailure = true)
+        }, { true }, { false })
+        assertEquals(listOf(CartBatchEntryStatus.FAILED, CartBatchEntryStatus.NOT_RUN), verified.entries.map { it.status })
+    }
+
+    @Test fun failedSkipPersistenceNeverStartsFollowingTarget() = runTest {
+        val targets = listOf(target(1), target(2))
+        val executed = mutableListOf<String>()
+        val result = CartBatchSequence.run(targets, {
+            executed += it.itemId
+            CartBatchAttemptResult(false, "receipt", skipStatus = CartBatchEntryStatus.SKIPPED)
+        }, { it.entries.first().status != CartBatchEntryStatus.SKIPPED }, { false })
+        assertEquals(listOf(targets.first().itemId), executed)
+        assertEquals(listOf(CartBatchEntryStatus.SKIPPED, CartBatchEntryStatus.NOT_RUN), result.entries.map { it.status })
+        assertEquals(0, result.addedCount)
+    }
+
+    @Test fun mismatchedOrCompletedInitialEntriesAndInvalidSkipStatesNeverPermitFurtherEffects() = runTest {
+        val targets = listOf(target(1), target(2))
+        for (initial in listOf(
+            targets.reversed().map(::CartBatchEntry),
+            listOf(CartBatchEntry(target(1))),
+            listOf(CartBatchEntry(target(1), CartBatchEntryStatus.ADDED), CartBatchEntry(target(2))),
+        )) {
+            val failure = runCatching {
+                CartBatchSequence.run(targets, { fail("Invalid preflight must not launch"); error("unreachable") }, { true }, { false }, initial)
+            }.exceptionOrNull()
+            assertTrue(failure is IllegalArgumentException)
+        }
+        var calls = 0
+        val result = CartBatchSequence.run(targets, {
+            calls++
+            CartBatchAttemptResult(false, "invalid skip", skipStatus = CartBatchEntryStatus.ADDED)
+        }, { true }, { false })
+        assertEquals(1, calls)
+        assertEquals(listOf(CartBatchEntryStatus.FAILED, CartBatchEntryStatus.NOT_RUN), result.entries.map { it.status })
+    }
+
 }

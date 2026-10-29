@@ -70,7 +70,7 @@ data class CartAssistDiagnostics(
 sealed interface CartAssistState {
     data object Idle : CartAssistState
     data class Running(val message: String) : CartAssistState
-    data class Finished(val message: String, val success: Boolean, val verifiedOnly: Boolean = false) : CartAssistState
+    data class Finished(val message: String, val success: Boolean, val verifiedOnly: Boolean = false, val unavailable: Boolean = false) : CartAssistState
 }
 
 /** One explicit foreground request only. Sessions are never restored or scheduled in the background. */
@@ -97,6 +97,7 @@ object CartAssistController {
         var scrollCount: Int = 0,
         var lastScrollAt: Long = 0,
         var identitySeenAt: Long = 0,
+        var unavailableSeenAt: Long = 0,
     ) {
         var priceCheckPassed = request.maxTotalWon == null
         var checkedPriceWon: Long? = null
@@ -114,6 +115,9 @@ object CartAssistController {
             actionStarted = true
             return action().also { clickAccepted = it }
         }
+
+        fun canReportUnavailable(success: Boolean): Boolean =
+            !success && !request.verifyOnly && !clickClaimed && !actionStarted && clickAccepted == null
 
         fun resultStatus(success: Boolean): String = when {
             !success -> "stopped"
@@ -315,7 +319,7 @@ object CartAssistController {
         updateDiagnostics(next)
     }
 
-    internal fun finish(message: String, success: Boolean) {
+    internal fun finish(message: String, success: Boolean, unavailable: Boolean = false) {
         val current = session ?: return
         session = null
         handler.removeCallbacks(timeout)
@@ -331,7 +335,8 @@ object CartAssistController {
         persist(current.id, current.resultStatus(success), current.request.verifyOnly)
         val priceMessage = current.checkedPriceWon?.let { " 상품가 ${java.text.NumberFormat.getIntegerInstance(java.util.Locale.KOREA).format(it)}원을 등록 한도 안에서 확인했습니다. 배송비·최종 결제 금액은 별도입니다." }.orEmpty()
         mutableState.value = CartAssistState.Finished(message + (if (success) priceMessage else "") +
-            (if (receiptSaved) "" else " 완료 기록 저장에 실패해 결과 확인 필요 상태를 유지합니다."), success, verifiedOnly = success && current.request.verifyOnly)
+            (if (receiptSaved) "" else " 완료 기록 저장에 실패해 결과 확인 필요 상태를 유지합니다."), success, verifiedOnly = success && current.request.verifyOnly,
+            unavailable = unavailable && current.canReportUnavailable(success))
     }
 
     private fun reject(message: String): Boolean {

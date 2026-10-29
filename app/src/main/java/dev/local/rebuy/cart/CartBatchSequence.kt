@@ -4,7 +4,7 @@ import dev.local.rebuy.domain.CoupangCartProductLink
 import kotlinx.coroutines.delay
 
 data class CartBatchTarget(val itemId: String, val title: String, val productUrl: String, val option: String, val quantity: Int = 1, val maxTotalWon: Long? = null)
-enum class CartBatchEntryStatus { PENDING, RUNNING, ADDED, FAILED, NOT_RUN }
+enum class CartBatchEntryStatus { PENDING, RUNNING, ADDED, FAILED, NOT_RUN, SKIPPED, REVIEW_REQUIRED }
 data class CartBatchEntry(val target: CartBatchTarget, val status: CartBatchEntryStatus = CartBatchEntryStatus.PENDING, val message: String = "")
 data class CartBatchState(
     val entries: List<CartBatchEntry> = emptyList(),
@@ -13,9 +13,18 @@ data class CartBatchState(
     val interrupted: Boolean = false,
 ) {
     val addedCount: Int get() = entries.count { it.status == CartBatchEntryStatus.ADDED }
+    val skippedCount: Int get() = entries.count { it.status == CartBatchEntryStatus.SKIPPED }
+    val reviewCount: Int get() = entries.count { it.status == CartBatchEntryStatus.REVIEW_REQUIRED }
+    val failedCount: Int get() = entries.count { it.status == CartBatchEntryStatus.FAILED }
     val totalCount: Int get() = entries.size
 }
-internal data class CartBatchAttemptResult(val success: Boolean, val message: String, val verifiedOnly: Boolean = false)
+internal data class CartBatchAttemptResult(
+    val success: Boolean,
+    val message: String,
+    val verifiedOnly: Boolean = false,
+    val skipStatus: CartBatchEntryStatus? = null,
+    val continueAfterFailure: Boolean = false,
+)
 
 internal object CartBatchValidation {
     const val MAX_TARGETS = 20
@@ -63,9 +72,16 @@ internal object CartBatchSequence {
         execute: suspend (CartBatchTarget) -> CartBatchAttemptResult,
         publish: (CartBatchState) -> Boolean,
         isCancelled: () -> Boolean,
+        initialEntries: List<CartBatchEntry>? = null,
     ): CartBatchState {
         val prepared = CartBatchValidation.prepare(targets)
-        var state = CartBatchState(prepared.map(::CartBatchEntry), running = true)
+        val entries = initialEntries?.toList() ?: prepared.map(::CartBatchEntry)
+        require(entries.map { it.target } == prepared && entries.all {
+            it.status in setOf(CartBatchEntryStatus.PENDING, CartBatchEntryStatus.SKIPPED, CartBatchEntryStatus.REVIEW_REQUIRED)
+        }) { "담기 대상과 사전 확인 기록이 일치하지 않습니다." }
+        var state = CartBatchState(entries, running = entries.any { it.status == CartBatchEntryStatus.PENDING })
+        fun complete(): CartBatchState = state.copy(running = false,
+            message = "추가 ${state.addedCount}개 · 기록 있어 건너뜀 ${state.skippedCount}개 · 확인 필요 ${state.reviewCount}개 · 실패 ${state.failedCount}개")
         fun stop(message: String, index: Int? = null): CartBatchState = state.copy(
             running = false, message = message,
             entries = state.entries.mapIndexed { entryIndex, entry ->
@@ -78,8 +94,13 @@ internal object CartBatchSequence {
                 }
             },
         )
+        if (!state.running) {
+            val finished = if (isCancelled()) stop("사용자가 중지했습니다. 담기는 실행하지 않았습니다.") else complete()
+            return if (publish(finished)) finished else finished.copy(message = "결과 기록을 저장하지 못했습니다. 담기는 실행하지 않았습니다.")
+        }
         for ((index, target) in prepared.withIndex()) {
             if (isCancelled()) return stop("사용자가 중지했습니다. 완료된 상품은 다시 담지 않습니다.")
+            if (state.entries[index].status != CartBatchEntryStatus.PENDING) continue
             state = state.copy(
                 entries = state.entries.mapIndexed { entryIndex, entry ->
                     if (entryIndex == index) entry.copy(status = CartBatchEntryStatus.RUNNING, message = "쿠팡에서 확인 중입니다.") else entry
@@ -89,21 +110,25 @@ internal object CartBatchSequence {
             if (!publish(state)) return stop("진행 기록을 저장하지 못해 다음 동작을 시작하지 않았습니다.", index)
             if (isCancelled()) return stop("사용자가 중지했습니다. 현재 상품의 결과는 장바구니에서 확인해 주세요.", index)
             val result = execute(target)
-            if (!result.success || result.verifiedOnly || isCancelled()) {
-                val reason = when {
-                    isCancelled() -> "사용자가 중지했습니다. 현재 상품의 결과는 장바구니에서 확인해 주세요."
-                    result.verifiedOnly -> "담기 전 점검은 실제 담기 완료로 처리할 수 없습니다."
-                    else -> result.message
+            if (isCancelled()) return stop("사용자가 중지했습니다. 현재 상품의 결과는 장바구니에서 확인해 주세요.", index)
+            if (result.verifiedOnly) return stop("담기 전 점검은 실제 담기 완료로 처리할 수 없습니다. 다음 상품은 시작하지 않았습니다.", index)
+            val nextStatus = when {
+                result.skipStatus != null -> {
+                    if (result.success || result.continueAfterFailure || result.skipStatus !in setOf(CartBatchEntryStatus.SKIPPED, CartBatchEntryStatus.REVIEW_REQUIRED))
+                        return stop("담기 결과의 상태를 확인하지 못해 다음 상품은 시작하지 않았습니다.", index)
+                    result.skipStatus
                 }
-                return stop(reason + " 다음 상품은 시작하지 않았습니다.", index)
+                result.success -> CartBatchEntryStatus.ADDED
+                result.continueAfterFailure -> CartBatchEntryStatus.FAILED
+                else -> return stop(result.message + " 다음 상품은 시작하지 않았습니다.", index)
             }
             state = state.copy(entries = state.entries.mapIndexed { entryIndex, entry ->
-                if (entryIndex == index) entry.copy(status = CartBatchEntryStatus.ADDED, message = result.message) else entry
+                if (entryIndex == index) entry.copy(status = nextStatus, message = result.message) else entry
             })
-            if (!publish(state)) return stop("완료 기록 저장에 실패해 나머지 상품은 시작하지 않았습니다.")
-            if (index < prepared.lastIndex) delay(500) // Let the previous native scan/runnable unwind.
+            if (!publish(state)) return stop("결과 기록 저장에 실패해 나머지 상품은 시작하지 않았습니다.")
+            if (state.entries.drop(index + 1).any { it.status == CartBatchEntryStatus.PENDING }) delay(500)
         }
-        return state.copy(running = false, message = state.addedCount.toString() + "개 상품의 담기 완료 안내를 확인했습니다.")
+        return complete()
     }
 
     fun interrupted(state: CartBatchState): CartBatchState = state.copy(

@@ -74,6 +74,12 @@ internal object CartAssistPolicy {
 
     fun isDetailScreen(nodes: List<Node>): Boolean = detailStructure(nodes).complete
 
+    fun isUnavailableProduct(nodes: List<Node>): Boolean = nodes.any { node ->
+        node.visible && node.ancestorIds.any { it in DETAIL_CONTENT_IDS } &&
+            node.ancestorIds.none { it.contains("recommend", ignoreCase = true) || it.contains("ranking", ignoreCase = true) } &&
+            normalize(node.text) == "현재판매중인상품이아닙니다"
+    }
+
     /** At most one attempt per observed container, inner list first; true means accepted. */
     fun requestDetailScroll(
         nodes: List<Node>,

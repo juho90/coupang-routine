@@ -87,23 +87,29 @@ class CartAssistControllerGateTest {
         assertTrue(CartAssistController.validRequest(request().copy(maxTotalWon = 100)))
     }
 
-    @Test fun recordedAdditionBlocksSingleAndWholeBatchBeforeAnyNativeLaunch() {
+    @Test fun recordedAdditionBlocksSingleButBatchReportsRecordedAndUncertainItemsWithoutLaunching() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val ledger = CartAdditionLedger(context)
         val recorded = request()
+        val uncertain = CartBatchTarget("uncertain", "다른 등록 상품 이름", "https://www.coupang.com/vp/products/12?itemId=21&vendorItemId=22", "600ml, 1개")
         assertTrue(ledger.clear(recorded.productUrl))
+        assertTrue(ledger.clear(uncertain.productUrl))
         assertTrue(ledger.claim(recorded.productUrl, "previous-request"))
         assertFalse(CartAssistController.start(context, recorded))
         assertNull(CartAssistController.currentSession())
-        assertNull(Shadows.shadowOf(context as Application).nextStartedActivity)
-        val earlier = CartBatchTarget("earlier", "다른 등록 상품 이름", "https://www.coupang.com/vp/products/12?itemId=21&vendorItemId=22", "600ml, 1개", maxTotalWon = 5000)
+        assertTrue(ledger.confirm(recorded.productUrl, "previous-request"))
+        assertTrue(ledger.claim(uncertain.productUrl, "uncertain-request"))
         val duplicate = CartBatchTarget("recorded", recorded.expectedTitle, recorded.productUrl, recorded.expectedOption)
-        assertFalse(CartBatchController.start(context, listOf(earlier, duplicate)))
+        assertTrue(CartBatchController.start(context, listOf(duplicate, uncertain)))
         assertFalse(CartBatchController.isRunning())
-        assertTrue(CartBatchController.state.value.message.contains("기록"))
+        assertEquals(listOf(CartBatchEntryStatus.SKIPPED, CartBatchEntryStatus.REVIEW_REQUIRED),
+            CartBatchController.state.value.entries.map { it.status })
+        assertEquals(0, CartBatchController.state.value.addedCount)
+        assertEquals(CartAdditionLedger.Status.CONFIRMED, ledger.lookup(recorded.productUrl)?.status)
+        assertEquals(CartAdditionLedger.Status.CLAIMED, ledger.lookup(uncertain.productUrl)?.status)
         assertNull(Shadows.shadowOf(context as Application).nextStartedActivity)
-        assertNull(ledger.lookup(earlier.productUrl))
         assertTrue(ledger.clear(recorded.productUrl))
+        assertTrue(ledger.clear(uncertain.productUrl))
     }
 
     @Test fun malformedRecordedAdditionStopsWithoutThrowingOrLaunching() {
@@ -117,6 +123,10 @@ class CartAssistControllerGateTest {
         assertTrue(prefs.edit().putString(key, "broken-json").commit())
         assertFalse(CartAssistController.start(context, request))
         assertNull(CartAssistController.currentSession())
+        assertNull(Shadows.shadowOf(context as Application).nextStartedActivity)
+        assertTrue(CartBatchController.start(context, listOf(CartBatchTarget("broken", request.expectedTitle, request.productUrl, request.expectedOption))))
+        assertEquals(CartBatchEntryStatus.REVIEW_REQUIRED, CartBatchController.state.value.entries.single().status)
+        assertFalse(CartBatchController.isRunning())
         assertNull(Shadows.shadowOf(context as Application).nextStartedActivity)
         assertTrue(ledger.clear(request.productUrl))
     }
