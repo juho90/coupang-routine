@@ -34,6 +34,7 @@ import dev.local.rebuy.cart.CartBatchEntryStatus
 import dev.local.rebuy.cart.CartBatchTarget
 import dev.local.rebuy.cart.CartBatchScope
 import dev.local.rebuy.cart.CartBatchSelection
+import dev.local.rebuy.cart.CartBatchValidation
 import dev.local.rebuy.data.RoutineItem
 import dev.local.rebuy.domain.CoupangCartProductLink
 import java.time.LocalDate
@@ -58,6 +59,9 @@ internal fun CartBatchDialog(items: List<RoutineItem>, today: Long, onPreparingC
         it.quantity != 1 || CartAssistPolicy.normalize(it.title).length < 4 ||
             it.title.length > 250 || CartAssistPolicy.normalizeOption(it.option).length < 2 ||
             it.option.length > 120 || it.productUrl.isBlank()
+    }
+    val linkProblems = remember(targets) {
+        targets.mapNotNull { target -> CartBatchValidation.directLinkProblem(target)?.let { target.itemId to it } }.toMap()
     }
     var error by rememberSaveable { mutableStateOf<String?>(null) }
     var hasStarted by rememberSaveable { mutableStateOf(batch.running) }
@@ -109,8 +113,12 @@ internal fun CartBatchDialog(items: List<RoutineItem>, today: Long, onPreparingC
         val target = queue[resolvingIndex]
         val product = runCatching { CoupangCartProductLink.parse(target.productUrl) }.getOrNull()
         if (product != null) {
-            resolved = resolved + target.copy(productUrl = product.canonicalUrl)
-            resolvingIndex += 1
+            val problem = CartBatchValidation.directLinkProblem(target)
+            if (problem != null) stopPreparation(problem)
+            else {
+                resolved = resolved + target.copy(productUrl = product.canonicalUrl)
+                resolvingIndex += 1
+            }
         }
     }
     fun begin() {
@@ -120,6 +128,7 @@ internal fun CartBatchDialog(items: List<RoutineItem>, today: Long, onPreparingC
             targets.isEmpty() -> if (scope == CartBatchScope.DUE) "오늘까지 구매 예정인 상품이 없습니다. 전체 활성 상품을 보려면 대상 범위를 바꿔 주세요." else "담을 활성 상품이 없습니다. 상품을 등록하거나 카드의 스위치로 활성화해 주세요."
             targets.size > 20 -> "한 번에 최대 20개 상품을 담을 수 있습니다."
             invalid.isNotEmpty() -> "상품 수정에서 구매 수량을 1개로 맞추고 링크로 상품 정보를 불러와 주세요."
+            linkProblems.isNotEmpty() -> linkProblems.values.joinToString("\n") + "\n이번 묶음 담기는 시작하지 않았습니다."
             CartAssistController.state.value is CartAssistState.Running || AutoBuyController.isActive() ->
                 "다른 구매 도우미가 실행 중입니다. 실행을 마친 뒤 다시 시작해 주세요."
             !CartAssistController.isEnabled(context) -> "Android 접근성 설정에서 다시담기 구매 도우미를 켜 주세요."
@@ -177,12 +186,17 @@ internal fun CartBatchDialog(items: List<RoutineItem>, today: Long, onPreparingC
                                 CartShareResolution(activeSequence * 100 + activeIndex, target.productUrl, target.title, target.option),
                                 onResolved = { canonical ->
                                     if (pending != null && sequence == activeSequence && resolvingIndex == activeIndex) {
-                                        resolved = resolved + target.copy(productUrl = canonical)
-                                        resolvingIndex += 1
+                                        val resolvedTarget = target.copy(productUrl = canonical)
+                                        val problem = CartBatchValidation.directLinkProblem(resolvedTarget)
+                                        if (problem != null) stopPreparation(problem)
+                                        else {
+                                            resolved = resolved + resolvedTarget
+                                            resolvingIndex += 1
+                                        }
                                     }
                                 },
                                 onFailure = { message ->
-                                    if (pending != null && sequence == activeSequence && resolvingIndex == activeIndex) stopPreparation(message)
+                                    if (pending != null && sequence == activeSequence && resolvingIndex == activeIndex) stopPreparation(CartBatchValidation.namedLinkProblem(target, message))
                                 },
                             )
                         }
@@ -215,6 +229,9 @@ internal fun CartBatchDialog(items: List<RoutineItem>, today: Long, onPreparingC
                                 Text("등록 한도 ${NumberFormat.getIntegerInstance(Locale.KOREA).format(maximum)}원", style = MaterialTheme.typography.bodySmall)
                             }
                             if (target in invalid) Text("등록 정보를 수정해야 합니다.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                            linkProblems[target.itemId]?.let { problem ->
+                                Text(problem, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("cart-batch-link-error-${target.itemId}"))
+                            }
                         }
                     }
                     if (batch.entries.isNotEmpty()) Text("지난 실행: ${batch.addedCount}/${batch.totalCount}개 완료 · ${batch.message}", style = MaterialTheme.typography.bodySmall)

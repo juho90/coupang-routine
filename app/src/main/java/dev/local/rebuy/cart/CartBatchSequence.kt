@@ -19,6 +19,15 @@ internal data class CartBatchAttemptResult(val success: Boolean, val message: St
 
 internal object CartBatchValidation {
     const val MAX_TARGETS = 20
+
+    fun namedLinkProblem(target: CartBatchTarget, reason: String): String =
+        "${target.title.trim().ifEmpty { "이름 없는 상품" }}: $reason"
+
+    fun directLinkProblem(target: CartBatchTarget): String? {
+        val product = runCatching { CoupangCartProductLink.parse(target.productUrl) }.getOrNull() ?: return null
+        if (product.itemId != null && product.vendorItemId != null) return null
+        return namedLinkProblem(target, CoupangCartProductLink.EXACT_OPTION_REQUIRED_MESSAGE)
+    }
     fun prepare(targets: List<CartBatchTarget>): List<CartBatchTarget> {
         require(targets.size in 1..MAX_TARGETS) { "한 번에 등록 상품 1~20개를 담을 수 있습니다." }
         val prepared = targets.map { item ->
@@ -27,7 +36,11 @@ internal object CartBatchValidation {
             require(item.quantity == 1) { "여러 상품 담기도 상품별 구매 수량 1개만 지원합니다." }
             require(item.title.length <= 250 && CartAssistPolicy.normalize(item.title).length >= 4) { "상품명을 확인해 주세요." }
             require(item.option.length <= 120 && CartAssistPolicy.normalizeOption(item.option).length >= 2) { "구매 옵션을 확인해 주세요." }
-            val product = CoupangCartProductLink.parseExactOption(item.productUrl)
+            val product = try {
+                CoupangCartProductLink.parseExactOption(item.productUrl)
+            } catch (invalid: IllegalArgumentException) {
+                throw IllegalArgumentException(namedLinkProblem(item, invalid.message ?: "상품 링크를 확인해 주세요."), invalid)
+            }
             item.copy(title = item.title.trim(), option = item.option.trim(), productUrl = product.canonicalUrl)
         }
         require(prepared.distinctBy { it.itemId }.size == prepared.size) { "동일한 등록 상품이 중복 선택됐습니다." }
